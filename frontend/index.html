@@ -764,8 +764,9 @@ function selectNode(el){const r=document.createRange();r.selectNodeContents(el);
 async function sendMessage(){
   if(generating)return;
   const p=document.getElementById("prompt"),prompt=p.value.trim();if(!prompt)return;
-  if(!currentProject){
-    const go=await askConfirm("No project open","Send this as a normal coding chat without project files?");
+  const continuingNormalChat=Boolean(currentChat?.id&&!currentChat?.project_id);
+  if(!currentProject&&!continuingNormalChat){
+    const go=await askConfirm("Start normal chat?","This new chat will continue without project files.");
     if(!go)return;
   }
   generating=true;document.getElementById("sendButton").disabled=true;setStatus("Generating…");
