@@ -14,10 +14,10 @@
 }
 body{font-family:Inter,-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial,sans-serif;background:var(--bg);color:var(--text)}
 button,input,textarea,select{font:inherit}button{cursor:pointer}.hidden{display:none!important}
-.app{height:100vh;display:grid;grid-template-columns:245px minmax(320px,1fr) minmax(320px,420px);overflow:hidden}
+.app{height:100vh;display:grid;grid-template-columns:var(--left-size,245px) 6px minmax(300px,1fr) 6px var(--workbench-size,46vw);grid-template-areas:"left split-left chat split-right workbench";overflow:hidden}
 
 /* LEFT */
-.left{background:var(--panel);border-right:1px solid var(--border);display:flex;flex-direction:column;min-width:0}
+.left{grid-area:left;background:var(--panel);display:flex;flex-direction:column;min-width:0}
 .brand{height:58px;display:flex;align-items:center;gap:10px;padding:0 14px;border-bottom:1px solid var(--border)}
 .logo{width:32px;height:32px;border-radius:9px;display:grid;place-items:center;background:linear-gradient(135deg,var(--accent),#3ba7ff);font:800 11px monospace}
 .brand strong{font-size:16px}.section-head{display:flex;align-items:center;justify-content:space-between;padding:13px 12px 7px;color:var(--muted2);font-size:10px;font-weight:800;letter-spacing:1px}
@@ -39,22 +39,25 @@ button,input,textarea,select{font:inherit}button{cursor:pointer}.hidden{display:
 .left-usage{border-top:1px solid var(--border);padding:10px 12px}.usage-row{display:flex;justify-content:space-between;gap:8px;font-size:10px;padding:3px 0;color:var(--muted)}
 .usage-row b{color:var(--text);font-weight:600}
 
-/* CENTER */
-.center{min-width:0;display:flex;flex-direction:column;background:var(--editor)}
+/* RIGHT WORKBENCH */
+.center{grid-area:workbench;min-width:0;display:flex;flex-direction:column;background:var(--editor)}
 .editor-top{height:58px;display:flex;align-items:center;justify-content:space-between;padding:0 12px;border-bottom:1px solid var(--border);background:var(--panel)}
 .editor-title{min-width:0;display:flex;align-items:center;gap:8px}.editor-title strong{font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .save-state{font-size:10px;color:var(--muted)}.toolbar{display:flex;gap:7px}
 .tool-btn{border:1px solid var(--border);background:var(--panel2);color:var(--text);border-radius:8px;padding:7px 10px;font-size:10px}.tool-btn:hover{background:var(--panel3)}
 .tool-btn.primary{background:var(--accent);border-color:var(--accent)}.tool-btn.primary:hover{background:var(--accent2)}
+.workbench-tabs{display:flex;gap:4px}.workbench-tab{border:1px solid transparent;background:transparent;color:var(--muted);border-radius:7px;padding:7px 9px;font-size:10px}
+.workbench-tab:hover{background:var(--panel3);color:#fff}.workbench-tab.active{border-color:var(--border);background:var(--panel3);color:#fff}
+.workbench-view{flex:1;min-height:0;display:flex;flex-direction:column}
 .editor-shell{flex:1;min-height:0;display:grid;grid-template-columns:52px 1fr;position:relative}
 .lines{overflow:hidden;background:#080b11;border-right:1px solid var(--border2);padding:14px 8px 40px 0;color:#465063;font:12px/1.6 "SFMono-Regular",Consolas,monospace;text-align:right;user-select:none;white-space:pre}
 .code-editor{width:100%;height:100%;resize:none;border:0;outline:0;background:var(--editor);color:#e7edf5;padding:14px 18px 40px;tab-size:2;font:12px/1.6 "SFMono-Regular",Consolas,"Liberation Mono",monospace;white-space:pre;overflow:auto}
 .editor-empty{position:absolute;inset:0;display:grid;place-items:center;text-align:center;color:var(--muted);padding:30px;background:var(--editor)}
 .editor-empty h2{font-size:18px;color:var(--text);margin:0 0 8px}.editor-empty p{margin:0;font-size:12px;line-height:1.6}
-.statusbar{height:28px;display:flex;align-items:center;justify-content:space-between;padding:0 10px;border-top:1px solid var(--border);background:var(--panel);color:var(--muted2);font-size:9px}
+.statusbar{height:28px;display:flex;align-items:center;justify-content:space-between;padding:0 180px 0 10px;border-top:1px solid var(--border);background:var(--panel);color:var(--muted2);font-size:9px}
 
-/* RIGHT CHAT */
-.right{border-left:1px solid var(--border);background:var(--panel);display:flex;flex-direction:column;min-width:0}
+/* MIDDLE CHAT */
+.right{grid-area:chat;position:relative;background:var(--panel);display:flex;flex-direction:column;min-width:0}
 .ai-top{height:58px;display:flex;align-items:center;justify-content:space-between;padding:0 12px;border-bottom:1px solid var(--border)}
 .ai-title strong{display:block;font-size:12px}.ai-title span{font-size:9px;color:var(--muted)}
 .chat-controls{display:flex;gap:5px}.chat-select{max-width:145px;border:1px solid var(--border);background:var(--panel2);color:#fff;border-radius:7px;padding:6px;font-size:9px}
@@ -68,11 +71,17 @@ button,input,textarea,select{font:inherit}button{cursor:pointer}.hidden{display:
 .copy-btn{border:0;background:transparent;color:var(--muted);font-size:8px}.codebox pre{margin:0;padding:10px;overflow:auto;font:10px/1.5 Consolas,monospace;white-space:pre}
 .file-update-note{margin-top:7px;border:1px solid rgba(62,213,152,.25);background:rgba(62,213,152,.07);color:#94e6c2;border-radius:7px;padding:7px 9px;font-size:9px}
 .typing{display:flex;gap:4px;padding-top:4px}.typing i{width:5px;height:5px;border-radius:50%;background:var(--muted);animation:b 1.1s infinite}.typing i:nth-child(2){animation-delay:.14s}.typing i:nth-child(3){animation-delay:.28s}@keyframes b{50%{transform:translateY(-4px)}}
-.composer-wrap{position:absolute;right:0;bottom:0;width:min(420px,calc(100vw - 565px));padding:28px 10px 10px;background:linear-gradient(transparent,var(--panel) 35%);pointer-events:none}
+.composer-wrap{position:absolute;right:0;bottom:0;width:100%;padding:28px 10px 10px;background:linear-gradient(transparent,var(--panel) 35%);pointer-events:none}
 .composer{border:1px solid var(--border);border-radius:12px;background:var(--panel2);overflow:hidden;pointer-events:auto}
 .prompt{width:100%;min-height:64px;max-height:170px;resize:none;border:0;outline:0;background:transparent;color:#fff;padding:11px;font-size:11px;line-height:1.5}
-.composer-bottom{display:flex;align-items:center;gap:6px;padding:6px;padding-right:180px}.lang{max-width:110px;border:1px solid var(--border);background:var(--panel3);color:#fff;border-radius:7px;padding:6px;font-size:9px}
+.composer-bottom{display:flex;align-items:center;gap:6px;padding:6px}.lang{max-width:110px;border:1px solid var(--border);background:var(--panel3);color:#fff;border-radius:7px;padding:6px;font-size:9px}
 .send{margin-left:auto;width:32px;height:32px;border:0;border-radius:8px;background:var(--accent);color:#fff;font-weight:800}.send:disabled{opacity:.4;cursor:default}
+
+/* RESIZERS */
+.resizer{position:relative;z-index:20;background:var(--panel);cursor:col-resize;touch-action:none}
+.resizer::after{content:"";position:absolute;top:0;bottom:0;left:2px;width:2px;background:var(--border2);transition:.15s}
+.resizer:hover::after,.resizer.dragging::after{background:var(--accent);box-shadow:0 0 8px rgba(116,87,255,.55)}
+.resizer-left{grid-area:split-left}.resizer-right{grid-area:split-right}body.resizing{cursor:col-resize;user-select:none}
 
 /* MODALS */
 .modal-bg{position:fixed;inset:0;z-index:100;background:rgba(0,0,0,.72);display:grid;place-items:center;padding:18px}
@@ -82,20 +91,19 @@ button,input,textarea,select{font:inherit}button{cursor:pointer}.hidden{display:
 .modal-actions{display:flex;justify-content:flex-end;gap:7px;margin-top:13px}.modal-btn{border:1px solid var(--border);border-radius:7px;background:var(--panel3);color:#fff;padding:7px 11px;font-size:10px}.modal-btn.primary{background:var(--accent);border-color:var(--accent)}.modal-btn.danger{color:#fff;background:#9f3144;border-color:#b94358}
 
 /* PREVIEW */
-.preview-bg{position:fixed;inset:0;z-index:120;background:#05070a;display:flex;flex-direction:column}
-.preview-top{height:48px;display:flex;align-items:center;justify-content:space-between;padding:0 12px;background:var(--panel);border-bottom:1px solid var(--border)}
-.preview-top strong{font-size:12px}.preview-actions{display:flex;gap:7px}.preview-frame{flex:1;width:100%;border:0;background:#fff}
+.preview-toolbar{height:34px;display:flex;align-items:center;justify-content:space-between;padding:0 10px;border-bottom:1px solid var(--border);background:var(--panel);color:var(--muted);font-size:10px}
+.preview-frame{flex:1;width:100%;min-height:0;border:0;background:#fff}.preview-placeholder{flex:1;display:grid;place-items:center;text-align:center;padding:28px;color:var(--muted);font-size:12px;line-height:1.6}
 
 /* MOBILE */
 .mobile-nav{display:none}
 @media(max-width:980px){
- .app{grid-template-columns:210px 1fr}.right{position:fixed;z-index:50;right:0;top:0;bottom:0;width:min(420px,92vw);transform:translateX(100%);transition:.2s;box-shadow:-20px 0 60px rgba(0,0,0,.45)}
- .right.open{transform:translateX(0)}.composer-wrap{width:min(420px,92vw)}.mobile-nav{display:inline-flex}
+ .app{grid-template-columns:210px 6px minmax(320px,1fr);grid-template-areas:"left split-left chat"}.resizer-right{display:none}
+ .center{position:fixed;z-index:60;right:0;top:0;bottom:0;width:min(680px,94vw);transform:translateX(105%);transition:.2s;box-shadow:-20px 0 60px rgba(0,0,0,.5)}
+ .center.open{transform:translateX(0)}.mobile-nav{display:inline-flex}
 }
 @media(max-width:680px){
- .app{grid-template-columns:1fr}.left{position:fixed;z-index:55;left:0;top:0;bottom:0;width:250px;transform:translateX(-100%);transition:.2s;box-shadow:20px 0 60px rgba(0,0,0,.45)}
+ .app{display:block}.resizer{display:none}.right{height:100vh}.left{position:fixed;z-index:55;left:0;top:0;bottom:0;width:250px;transform:translateX(-100%);transition:.2s;box-shadow:20px 0 60px rgba(0,0,0,.45)}
  .left.open{transform:translateX(0)}.editor-top{padding:0 8px}.editor-shell{grid-template-columns:42px 1fr}.lines{font-size:10px}.code-editor{font-size:10px;padding-left:10px}
- .composer-bottom{padding-right:170px}
 }
 </style>
 </head>
@@ -157,41 +165,54 @@ button,input,textarea,select{font:inherit}button{cursor:pointer}.hidden{display:
 <section class="center">
   <header class="editor-top">
     <div class="editor-title">
-      <button class="tool-btn mobile-nav" onclick="toggleLeft()">☰</button>
       <strong id="editorFileName">No file open</strong>
       <span id="saveState" class="save-state"></span>
     </div>
     <div class="toolbar">
       <button class="tool-btn" onclick="forceSaveActive()">Save</button>
-      <button class="tool-btn primary" onclick="openPreview()">▶ Preview</button>
-      <button class="tool-btn mobile-nav" onclick="toggleRight()">AI</button>
+      <div class="workbench-tabs">
+        <button id="codeViewTab" class="workbench-tab" onclick="showWorkbenchView('code')">Code</button>
+        <button id="previewViewTab" class="workbench-tab active" onclick="openPreview()">Preview</button>
+      </div>
+      <button class="tool-btn mobile-nav" onclick="toggleWorkbench()">×</button>
     </div>
   </header>
 
-  <div class="editor-shell">
-    <div id="lineNumbers" class="lines">1</div>
-    <textarea id="codeEditor" class="code-editor" spellcheck="false" disabled
-      oninput="editorChanged()" onscroll="syncLines()" onkeydown="editorKeydown(event)"></textarea>
-    <div id="editorEmpty" class="editor-empty">
-      <div><h2>CodePilot Workspace</h2><p>Create a project, choose a file, then edit it here.<br>Files are stored in Cloudflare D1.</p></div>
+  <div id="codeView" class="workbench-view hidden">
+    <div class="editor-shell">
+      <div id="lineNumbers" class="lines">1</div>
+      <textarea id="codeEditor" class="code-editor" spellcheck="false" disabled
+        oninput="editorChanged()" onscroll="syncLines()" onkeydown="editorKeydown(event)"></textarea>
+      <div id="editorEmpty" class="editor-empty">
+        <div><h2>CodePilot Workspace</h2><p>Create a project, choose a file, then edit it here.<br>Files are stored in Cloudflare D1.</p></div>
+      </div>
     </div>
+
+    <footer class="statusbar">
+      <span id="statusLeft">Ready</span>
+      <span id="statusRight">CodePilot v2.0</span>
+    </footer>
   </div>
 
-  <footer class="statusbar">
-    <span id="statusLeft">Ready</span>
-    <span id="statusRight">CodePilot v2.0</span>
-  </footer>
+  <div id="previewView" class="workbench-view">
+    <div class="preview-toolbar"><span id="previewTitle">Live preview</span><button class="icon-btn" onclick="refreshPreview()" title="Refresh preview">↻ Refresh</button></div>
+    <div id="previewPlaceholder" class="preview-placeholder">Open a project with an index.html file to see its preview.</div>
+    <iframe id="previewFrame" class="preview-frame hidden" sandbox="allow-scripts allow-forms allow-modals"></iframe>
+  </div>
 </section>
 
 <aside id="rightPanel" class="right">
   <header class="ai-top">
-    <div class="ai-title"><strong>AI Assistant</strong><span id="aiProjectLabel">No project attached</span></div>
+    <div class="ai-title">
+      <button class="icon-btn mobile-nav" onclick="toggleLeft()" title="Workspace">☰</button>
+      <strong>AI Assistant</strong><span id="aiProjectLabel">No project attached</span>
+    </div>
     <div class="chat-controls">
       <select id="chatSelect" class="chat-select" onchange="chatSelectChanged()"><option value="">New Chat</option></select>
       <button class="icon-btn" onclick="newChat()" title="New chat">＋</button>
       <button class="icon-btn" onclick="renameChat()" title="Rename chat">✎</button>
       <button class="icon-btn" onclick="deleteChat()" title="Delete chat">⌫</button>
-      <button class="icon-btn mobile-nav" onclick="toggleRight()">×</button>
+      <button class="icon-btn mobile-nav" onclick="toggleWorkbench()" title="Code and preview">▣</button>
     </div>
   </header>
 
@@ -215,6 +236,9 @@ button,input,textarea,select{font:inherit}button{cursor:pointer}.hidden{display:
     </div>
   </div>
 </aside>
+
+<div id="leftResizer" class="resizer resizer-left" role="separator" tabindex="0" aria-label="Resize workspace and chat panels" aria-orientation="vertical"></div>
+<div id="rightResizer" class="resizer resizer-right" role="separator" tabindex="0" aria-label="Resize chat and preview panels" aria-orientation="vertical"></div>
 </div>
 
 <!-- generic input modal -->
@@ -237,7 +261,7 @@ button,input,textarea,select{font:inherit}button{cursor:pointer}.hidden{display:
     <p id="confirmDescription"></p>
     <div class="modal-actions">
       <button class="modal-btn" onclick="closeConfirmModal(false)">Cancel</button>
-      <button class="modal-btn danger" onclick="closeConfirmModal(true)">Delete</button>
+      <button id="confirmButton" class="modal-btn primary" onclick="closeConfirmModal(true)">Continue</button>
     </div>
   </div>
 </div>
@@ -253,18 +277,6 @@ button,input,textarea,select{font:inherit}button{cursor:pointer}.hidden{display:
       <button class="modal-btn danger" onclick="fileMenuDelete()">Delete</button>
     </div>
   </div>
-</div>
-
-<!-- preview -->
-<div id="previewModal" class="preview-bg hidden">
-  <div class="preview-top">
-    <strong id="previewTitle">Preview</strong>
-    <div class="preview-actions">
-      <button class="tool-btn" onclick="refreshPreview()">↻ Refresh</button>
-      <button class="tool-btn" onclick="closePreview()">Close</button>
-    </div>
-  </div>
-  <iframe id="previewFrame" class="preview-frame" sandbox="allow-scripts allow-forms allow-modals"></iframe>
 </div>
 
 <script>
@@ -287,6 +299,7 @@ let inputResolve=null, confirmResolve=null, fileMenuTarget=null;
 document.addEventListener("DOMContentLoaded", init);
 
 async function init(){
+  setupResizers();
   if(API_BASE_URL.includes("PASTE_YOUR_WORKER_URL_HERE")){
     setStatus("Worker URL missing","error");
     return;
@@ -347,6 +360,7 @@ async function openProject(id,preferredFileId=null){
       if(!target) target=files.find(f=>f.name==="index.html")||files[0];
       openFileLocal(target.id);
     }else clearEditor();
+    if(!document.getElementById("previewView").classList.contains("hidden"))buildPreview();
     setStatus("Ready");
     closeLeftOnMobile();
   }catch(e){setStatus("Project error","error");alert(e.message);}
@@ -356,6 +370,7 @@ function clearProject(){
   currentProject=null;files=[];activeFile=null;dirty=false;
   renderProjectSelect();renderFiles();clearEditor();
   document.getElementById("aiProjectLabel").textContent="No project attached";
+  showPreviewPlaceholder("Open a project with an index.html file to see its preview.");
 }
 
 async function createProject(){
@@ -384,7 +399,7 @@ async function renameProject(){
 async function deleteProject(){
   if(!currentProject)return alert("Open a project first.");
   const name=currentProject.name;
-  const ok=await askConfirm("Delete project?",'Delete "'+name+'" and all of its files? This cannot be undone.');
+  const ok=await askConfirm("Delete project?",'Delete "'+name+'" and all of its files? This cannot be undone.',{confirmLabel:"Delete",danger:true});
   if(!ok)return;
   try{
     await api("/projects/"+encodeURIComponent(currentProject.id),{method:"DELETE"});
@@ -419,7 +434,7 @@ function fileIcon(name){
 
 async function openFile(id){
   if(activeFile?.id===id)return;
-  await forceSaveActive();openFileLocal(id);
+  await forceSaveActive();openFileLocal(id);showWorkbenchView("code");
 }
 
 function openFileLocal(id){
@@ -477,7 +492,7 @@ async function fileMenuRename(){
 
 async function fileMenuDelete(){
   const f=fileMenuTarget;if(!f)return;closeFileMenu();
-  const ok=await askConfirm("Delete file?",'Delete "'+f.name+'"?');if(!ok)return;
+  const ok=await askConfirm("Delete file?",'Delete "'+f.name+'"?',{confirmLabel:"Delete",danger:true});if(!ok)return;
   try{
     await api("/projects/"+encodeURIComponent(currentProject.id)+"/files/"+encodeURIComponent(f.id),{method:"DELETE"});
     const wasActive=activeFile?.id===f.id;files=files.filter(x=>x.id!==f.id);
@@ -535,16 +550,31 @@ function syncLines(){document.getElementById("lineNumbers").scrollTop=document.g
    LIVE PREVIEW
 ========================================================= */
 async function openPreview(){
-  if(!currentProject)return alert("Open a project first.");
-  try{await forceSaveActive();await reloadProjectFilesPreserve();buildPreview();document.getElementById("previewModal").classList.remove("hidden");}
+  showWorkbenchView("preview");
+  if(!currentProject){showPreviewPlaceholder("Open a project with an index.html file to see its preview.");return;}
+  try{await forceSaveActive();await reloadProjectFilesPreserve();buildPreview();}
   catch(e){alert("Preview failed:\\n"+e.message);}
 }
 async function refreshPreview(){try{await forceSaveActive();await reloadProjectFilesPreserve();buildPreview();}catch(e){alert(e.message);}}
-function closePreview(){document.getElementById("previewModal").classList.add("hidden");}
+function closePreview(){showWorkbenchView("code");}
+
+function showWorkbenchView(name){
+  const preview=name==="preview";
+  document.getElementById("codeView").classList.toggle("hidden",preview);
+  document.getElementById("previewView").classList.toggle("hidden",!preview);
+  document.getElementById("codeViewTab").classList.toggle("active",!preview);
+  document.getElementById("previewViewTab").classList.toggle("active",preview);
+  if(innerWidth<=980)document.querySelector(".center").classList.add("open");
+}
+
+function showPreviewPlaceholder(text){
+  const placeholder=document.getElementById("previewPlaceholder"),frame=document.getElementById("previewFrame");
+  placeholder.textContent=text;placeholder.classList.remove("hidden");frame.classList.add("hidden");frame.removeAttribute("srcdoc");
+}
 
 function buildPreview(){
   const htmlFile=files.find(f=>f.name.toLowerCase()==="index.html");
-  if(!htmlFile){alert("Preview needs an index.html file.");return;}
+  if(!htmlFile){showPreviewPlaceholder("Preview needs an index.html file.");return;}
   const cssFile=files.find(f=>f.name.toLowerCase()==="style.css");
   const jsFile=files.find(f=>f.name.toLowerCase()==="script.js");
   let doc=htmlFile.content||"";
@@ -571,7 +601,8 @@ function buildPreview(){
   }
 
   document.getElementById("previewTitle").textContent=currentProject.name+" — Preview";
-  document.getElementById("previewFrame").srcdoc=doc;
+  const placeholder=document.getElementById("previewPlaceholder"),frame=document.getElementById("previewFrame");
+  placeholder.classList.add("hidden");frame.classList.remove("hidden");frame.srcdoc=doc;
 }
 
 /* =========================================================
@@ -638,7 +669,7 @@ async function deleteChat(){
 async function deleteChatById(id){
   const chat=chats.find(c=>c.id===id)||(currentChat?.id===id?currentChat:null);if(!chat)return;
   const title=chat.title||"this chat";
-  const ok=await askConfirm("Delete chat?",'Delete "'+title+'" and all of its messages? This cannot be undone.');
+  const ok=await askConfirm("Delete chat?",'Delete "'+title+'" and all of its messages? This cannot be undone.',{confirmLabel:"Delete",danger:true});
   if(!ok)return;
   try{
     await api("/chats/"+encodeURIComponent(id),{method:"DELETE"});
@@ -651,7 +682,7 @@ async function openChat(id){
   try{
     const d=await api("/chats/"+encodeURIComponent(id));currentChat=d.chat;messages=Array.isArray(d.messages)?d.messages:[];
     if(currentChat.project_id&&currentChat.project_id!==currentProject?.id) await openProject(currentChat.project_id);
-    renderChatSelect();renderMessages();updateChatUsage();closeRightOnMobile();closeLeftOnMobile();
+    renderChatSelect();renderMessages();updateChatUsage();closeLeftOnMobile();
   }catch(e){alert(e.message);}
 }
 
@@ -724,6 +755,7 @@ async function sendMessage(){
     if(currentProject&&Array.isArray(d.filesUpdated)&&d.filesUpdated.length){
       const oldId=activeFile?.id||null;
       await reloadProjectFilesPreserve(oldId);
+      if(!document.getElementById("previewView").classList.contains("hidden"))buildPreview();
       flashStatus("AI updated "+d.filesUpdated.map(f=>f.name).join(", "));
     }
     renderChatSelect();updateChatUsage();setStatus("Ready");
@@ -783,10 +815,45 @@ function showSidebarPane(name){
   document.getElementById("chatsTab").classList.toggle("active",chats);
   if(chats)renderLeftChats();
 }
+function setupResizers(){
+  const app=document.querySelector(".app"),left=document.getElementById("leftPanel"),workbench=document.querySelector(".center");
+  const leftHandle=document.getElementById("leftResizer"),rightHandle=document.getElementById("rightResizer");
+  const clamp=(value,min,max)=>Math.min(Math.max(value,min),Math.max(min,max));
+  const savedNumber=key=>{try{const value=Number(localStorage.getItem(key));return Number.isFinite(value)&&value>0?value:null}catch{return null}};
+
+  function applySizes(leftSize,rightSize,save=true){
+    if(innerWidth<=980)return;
+    const available=Math.max(620,app.clientWidth-312);
+    const nextLeft=clamp(leftSize,190,Math.min(420,available-320));
+    const nextRight=clamp(rightSize,320,Math.min(900,available-nextLeft));
+    app.style.setProperty("--left-size",nextLeft+"px");app.style.setProperty("--workbench-size",nextRight+"px");
+    if(save)try{localStorage.setItem("codepilot-left-size",String(nextLeft));localStorage.setItem("codepilot-workbench-size",String(nextRight))}catch{}
+  }
+
+  const initialLeft=savedNumber("codepilot-left-size")||245;
+  const initialRight=savedNumber("codepilot-workbench-size")||Math.round(innerWidth*.46);
+  applySizes(initialLeft,initialRight,false);
+
+  function startDrag(event,side){
+    if(innerWidth<=980)return;
+    event.preventDefault();
+    const startX=event.clientX,startLeft=left.getBoundingClientRect().width,startRight=workbench.getBoundingClientRect().width;
+    const handle=side==="left"?leftHandle:rightHandle;handle.classList.add("dragging");document.body.classList.add("resizing");
+    const move=e=>applySizes(side==="left"?startLeft+(e.clientX-startX):startLeft,side==="right"?startRight-(e.clientX-startX):startRight,false);
+    const stop=()=>{document.removeEventListener("pointermove",move);document.removeEventListener("pointerup",stop);handle.classList.remove("dragging");document.body.classList.remove("resizing");applySizes(left.getBoundingClientRect().width,workbench.getBoundingClientRect().width,true)};
+    document.addEventListener("pointermove",move);document.addEventListener("pointerup",stop,{once:true});
+  }
+
+  leftHandle.addEventListener("pointerdown",e=>startDrag(e,"left"));rightHandle.addEventListener("pointerdown",e=>startDrag(e,"right"));
+  leftHandle.addEventListener("dblclick",()=>applySizes(245,workbench.getBoundingClientRect().width));
+  rightHandle.addEventListener("dblclick",()=>applySizes(left.getBoundingClientRect().width,Math.round(innerWidth*.46)));
+  leftHandle.addEventListener("keydown",e=>{if(e.key==="ArrowLeft"||e.key==="ArrowRight"){e.preventDefault();applySizes(left.getBoundingClientRect().width+(e.key==="ArrowRight"?16:-16),workbench.getBoundingClientRect().width)}});
+  rightHandle.addEventListener("keydown",e=>{if(e.key==="ArrowLeft"||e.key==="ArrowRight"){e.preventDefault();applySizes(left.getBoundingClientRect().width,workbench.getBoundingClientRect().width+(e.key==="ArrowLeft"?16:-16))}});
+  addEventListener("resize",()=>applySizes(left.getBoundingClientRect().width,workbench.getBoundingClientRect().width,false));
+}
 function toggleLeft(){document.getElementById("leftPanel").classList.toggle("open")}
-function toggleRight(){document.getElementById("rightPanel").classList.toggle("open")}
+function toggleWorkbench(){document.querySelector(".center").classList.toggle("open")}
 function closeLeftOnMobile(){if(innerWidth<=680)document.getElementById("leftPanel").classList.remove("open")}
-function closeRightOnMobile(){if(innerWidth<=980)document.getElementById("rightPanel").classList.remove("open")}
 
 /* =========================================================
    MODALS
@@ -804,10 +871,12 @@ function closeInputModal(result=null){document.getElementById("inputModal").clas
 function confirmInputModal(){const v=document.getElementById("inputValue").value.trim();closeInputModal(v||null);}
 function modalInputKey(e){if(e.key==="Enter"){e.preventDefault();confirmInputModal()}if(e.key==="Escape")closeInputModal(null)}
 
-function askConfirm(title,description){
+function askConfirm(title,description,{confirmLabel="Continue",danger=false}={}){
   return new Promise(resolve=>{
     confirmResolve=resolve;document.getElementById("confirmTitle").textContent=title;
     document.getElementById("confirmDescription").textContent=description;
+    const button=document.getElementById("confirmButton");button.textContent=confirmLabel;
+    button.classList.toggle("danger",danger);button.classList.toggle("primary",!danger);
     document.getElementById("confirmModal").classList.remove("hidden");
   });
 }
