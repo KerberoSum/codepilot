@@ -1,0 +1,14 @@
+{
+  "name": "codepilot",
+  "private": true,
+  "scripts": {
+    "dev:worker": "wrangler dev --config wrangler.jsonc",
+    "deploy:worker": "wrangler deploy --config wrangler.jsonc",
+    "db:migrate:local": "wrangler d1 migrations apply DB --local --config wrangler.jsonc",
+    "db:migrate:remote": "wrangler d1 migrations apply DB --remote --config wrangler.jsonc"
+  },
+  "devDependencies": {
+    "wrangler": "^4.0.0"
+  }
+}
+

@@ -1,0 +1,9 @@
+node_modules/
+.dev.vars
+.env
+.env.*
+.wrangler/
+.netlify/
+.DS_Store
+Thumbs.db
+

@@ -1,0 +1,15 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "codepilot-api",
+  "main": "worker/src/index.js",
+  "compatibility_date": "2026-09-07",
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "codepilot-db",
+      "database_id": "REPLACE_WITH_YOUR_D1_DATABASE_ID",
+      "migrations_dir": "migrations"
+    }
+  ]
+}
+
