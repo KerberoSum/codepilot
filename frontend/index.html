@@ -21,6 +21,10 @@ button,input,textarea,select{font:inherit}button{cursor:pointer}.hidden{display:
 .brand{height:58px;display:flex;align-items:center;gap:10px;padding:0 14px;border-bottom:1px solid var(--border)}
 .logo{width:32px;height:32px;border-radius:9px;display:grid;place-items:center;background:linear-gradient(135deg,var(--accent),#3ba7ff);font:800 11px monospace}
 .brand strong{font-size:16px}.section-head{display:flex;align-items:center;justify-content:space-between;padding:13px 12px 7px;color:var(--muted2);font-size:10px;font-weight:800;letter-spacing:1px}
+.sidebar-tabs{display:grid;grid-template-columns:1fr 1fr;gap:5px;padding:8px;border-bottom:1px solid var(--border2)}
+.sidebar-tab{border:1px solid transparent;border-radius:7px;padding:7px 5px;background:transparent;color:var(--muted);font-size:10px;font-weight:700}
+.sidebar-tab:hover{background:var(--panel2);color:#fff}.sidebar-tab.active{border-color:var(--border);background:var(--panel3);color:#fff}
+.sidebar-pane{flex:1;min-height:0;display:flex;flex-direction:column}
 .icon-btn{border:0;background:transparent;color:var(--muted);border-radius:6px;padding:4px 7px}.icon-btn:hover{background:var(--panel3);color:#fff}
 .project-bar{padding:8px 10px 10px;border-bottom:1px solid var(--border2)}
 .project-select{width:100%;padding:9px 10px;border:1px solid var(--border);border-radius:8px;background:var(--panel2);color:#fff;outline:0}
@@ -30,6 +34,8 @@ button,input,textarea,select{font:inherit}button{cursor:pointer}.hidden{display:
 .file-icon{width:18px;text-align:center;color:#8fb6ff;font:700 10px monospace}.file-name{flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .file-dirty{width:6px;height:6px;border-radius:50%;background:var(--yellow)}
 .file-menu{opacity:0;border:0;background:transparent;color:var(--muted);padding:2px 4px}.file-row:hover .file-menu{opacity:1}
+.chat-row-actions{display:flex;align-items:center;gap:1px}.chat-action{opacity:0;border:0;background:transparent;color:var(--muted);border-radius:5px;padding:3px 5px;font-size:10px}
+.file-row:hover .chat-action,.file-row.active .chat-action{opacity:1}.chat-action:hover{background:var(--border);color:#fff}.chat-action.danger:hover{background:#632837;color:#ffb4c0}
 .left-usage{border-top:1px solid var(--border);padding:10px 12px}.usage-row{display:flex;justify-content:space-between;gap:8px;font-size:10px;padding:3px 0;color:var(--muted)}
 .usage-row b{color:var(--text);font-weight:600}
 
@@ -65,7 +71,7 @@ button,input,textarea,select{font:inherit}button{cursor:pointer}.hidden{display:
 .composer-wrap{position:absolute;right:0;bottom:0;width:min(420px,calc(100vw - 565px));padding:28px 10px 10px;background:linear-gradient(transparent,var(--panel) 35%);pointer-events:none}
 .composer{border:1px solid var(--border);border-radius:12px;background:var(--panel2);overflow:hidden;pointer-events:auto}
 .prompt{width:100%;min-height:64px;max-height:170px;resize:none;border:0;outline:0;background:transparent;color:#fff;padding:11px;font-size:11px;line-height:1.5}
-.composer-bottom{display:flex;align-items:center;gap:6px;padding:6px}.lang{max-width:110px;border:1px solid var(--border);background:var(--panel3);color:#fff;border-radius:7px;padding:6px;font-size:9px}
+.composer-bottom{display:flex;align-items:center;gap:6px;padding:6px;padding-right:180px}.lang{max-width:110px;border:1px solid var(--border);background:var(--panel3);color:#fff;border-radius:7px;padding:6px;font-size:9px}
 .send{margin-left:auto;width:32px;height:32px;border:0;border-radius:8px;background:var(--accent);color:#fff;font-weight:800}.send:disabled{opacity:.4;cursor:default}
 
 /* MODALS */
@@ -89,6 +95,7 @@ button,input,textarea,select{font:inherit}button{cursor:pointer}.hidden{display:
 @media(max-width:680px){
  .app{grid-template-columns:1fr}.left{position:fixed;z-index:55;left:0;top:0;bottom:0;width:250px;transform:translateX(-100%);transition:.2s;box-shadow:20px 0 60px rgba(0,0,0,.45)}
  .left.open{transform:translateX(0)}.editor-top{padding:0 8px}.editor-shell{grid-template-columns:42px 1fr}.lines{font-size:10px}.code-editor{font-size:10px;padding-left:10px}
+ .composer-bottom{padding-right:170px}
 }
 </style>
 </head>
@@ -98,28 +105,45 @@ button,input,textarea,select{font:inherit}button{cursor:pointer}.hidden{display:
 <aside id="leftPanel" class="left">
   <div class="brand"><div class="logo">&lt;/&gt;</div><strong>CodePilot</strong></div>
 
-  <div class="section-head">
-    <span>PROJECT</span>
-    <button class="icon-btn" onclick="createProject()" title="New project">＋</button>
+  <div class="sidebar-tabs">
+    <button id="explorerTab" class="sidebar-tab active" onclick="showSidebarPane('explorer')">Explorer</button>
+    <button id="chatsTab" class="sidebar-tab" onclick="showSidebarPane('chats')">Chats</button>
   </div>
 
-  <div class="project-bar">
-    <select id="projectSelect" class="project-select" onchange="projectSelectChanged()">
-      <option value="">No project</option>
-    </select>
-    <div class="project-actions">
-      <button class="small-btn" onclick="renameProject()">Rename</button>
-      <button class="small-btn" onclick="deleteProject()">Delete</button>
+  <div id="explorerPane" class="sidebar-pane">
+    <div class="section-head">
+      <span>PROJECT</span>
+      <button class="icon-btn" onclick="createProject()" title="New project">＋</button>
+    </div>
+
+    <div class="project-bar">
+      <select id="projectSelect" class="project-select" onchange="projectSelectChanged()">
+        <option value="">No project</option>
+      </select>
+      <div class="project-actions">
+        <button class="small-btn" onclick="renameProject()">Rename</button>
+        <button class="small-btn" onclick="deleteProject()">Delete</button>
+      </div>
+    </div>
+
+    <div class="section-head">
+      <span>FILES</span>
+      <button class="icon-btn" onclick="createFile()" title="New file">＋</button>
+    </div>
+
+    <div id="fileList" class="files">
+      <div style="padding:14px;color:var(--muted2);font-size:11px">Create or open a project.</div>
     </div>
   </div>
 
-  <div class="section-head">
-    <span>FILES</span>
-    <button class="icon-btn" onclick="createFile()" title="New file">＋</button>
-  </div>
-
-  <div id="fileList" class="files">
-    <div style="padding:14px;color:var(--muted2);font-size:11px">Create or open a project.</div>
+  <div id="chatsPane" class="sidebar-pane hidden">
+    <div class="section-head">
+      <span>CHAT SESSIONS</span>
+      <button class="icon-btn" onclick="newChat()" title="New chat">＋</button>
+    </div>
+    <div id="leftChatList" class="files">
+      <div style="padding:14px;color:var(--muted2);font-size:11px">No chat sessions yet.</div>
+    </div>
   </div>
 
   <div class="left-usage">
@@ -165,6 +189,8 @@ button,input,textarea,select{font:inherit}button{cursor:pointer}.hidden{display:
     <div class="chat-controls">
       <select id="chatSelect" class="chat-select" onchange="chatSelectChanged()"><option value="">New Chat</option></select>
       <button class="icon-btn" onclick="newChat()" title="New chat">＋</button>
+      <button class="icon-btn" onclick="renameChat()" title="Rename chat">✎</button>
+      <button class="icon-btn" onclick="deleteChat()" title="Delete chat">⌫</button>
       <button class="icon-btn mobile-nav" onclick="toggleRight()">×</button>
     </div>
   </header>
@@ -245,7 +271,7 @@ button,input,textarea,select{font:inherit}button{cursor:pointer}.hidden{display:
 /* =========================================================
    CHANGE ONLY THIS VALUE
 ========================================================= */
-const API_BASE_URL = "https://aged-dawn-44a4.kersum2010821.workers.dev";
+const API_BASE_URL = "PASTE_YOUR_WORKER_URL_HERE";
 
 /* =========================================================
    STATE - nothing persistent is stored in the browser
@@ -261,7 +287,7 @@ let inputResolve=null, confirmResolve=null, fileMenuTarget=null;
 document.addEventListener("DOMContentLoaded", init);
 
 async function init(){
-  if(API_BASE_URL.includes("https://aged-dawn-44a4.kersum2010821.workers.dev")){
+  if(API_BASE_URL.includes("PASTE_YOUR_WORKER_URL_HERE")){
     setStatus("Worker URL missing","error");
     return;
   }
@@ -559,7 +585,27 @@ function renderChatSelect(){
   s.innerHTML='<option value="">New Chat</option>';
   chats.forEach(c=>{
     const o=document.createElement("option");o.value=c.id;o.textContent=c.title||"New Chat";s.appendChild(o);
-  });s.value=id;
+  });s.value=id;renderLeftChats();
+}
+function renderLeftChats(){
+  const list=document.getElementById("leftChatList");if(!list)return;
+  list.innerHTML="";
+  if(!chats.length){
+    list.innerHTML='<div style="padding:14px;color:var(--muted2);font-size:11px;line-height:1.5">No chat sessions yet.<br>Start one with the ＋ button.</div>';
+    return;
+  }
+  chats.forEach(chat=>{
+    const row=document.createElement("div");row.className="file-row"+(currentChat?.id===chat.id?" active":"");
+    row.onclick=()=>openChat(chat.id);
+    const icon=document.createElement("span");icon.className="file-icon";icon.textContent="AI";
+    const name=document.createElement("span");name.className="file-name";name.textContent=chat.title||"New Chat";
+    const actions=document.createElement("span");actions.className="chat-row-actions";
+    const rename=document.createElement("button");rename.className="chat-action";rename.title="Rename chat";rename.textContent="✎";
+    rename.onclick=e=>{e.stopPropagation();renameChatById(chat.id)};
+    const remove=document.createElement("button");remove.className="chat-action danger";remove.title="Delete chat";remove.textContent="⌫";
+    remove.onclick=e=>{e.stopPropagation();deleteChatById(chat.id)};
+    actions.append(rename,remove);row.append(icon,name,actions);list.appendChild(row);
+  });
 }
 async function chatSelectChanged(){
   const id=document.getElementById("chatSelect").value;if(!id){newChat();return;}
@@ -568,11 +614,44 @@ async function chatSelectChanged(){
 function newChat(){
   currentChat=null;messages=[];renderChatSelect();renderMessages();updateChatUsage();
 }
+async function renameChat(){
+  if(!currentChat)return alert("Open an existing chat first.");
+  await renameChatById(currentChat.id);
+}
+async function renameChatById(id){
+  const chat=chats.find(c=>c.id===id)||(currentChat?.id===id?currentChat:null);if(!chat)return;
+  const title=await askInput("Rename chat","Enter a new name for this chat.",chat.title||"New Chat");
+  if(!title)return;
+  try{
+    const d=await api("/chats/"+encodeURIComponent(id),{
+      method:"PATCH",headers:{"Content-Type":"application/json"},body:JSON.stringify({title})
+    });
+    if(currentChat?.id===id)currentChat.title=d.title;
+    const item=chats.find(c=>c.id===id);if(item)item.title=d.title;
+    renderChatSelect();flashStatus("Chat renamed");
+  }catch(e){alert("Could not rename chat:\n\n"+e.message);}
+}
+async function deleteChat(){
+  if(!currentChat)return alert("Open an existing chat first.");
+  await deleteChatById(currentChat.id);
+}
+async function deleteChatById(id){
+  const chat=chats.find(c=>c.id===id)||(currentChat?.id===id?currentChat:null);if(!chat)return;
+  const title=chat.title||"this chat";
+  const ok=await askConfirm("Delete chat?",'Delete "'+title+'" and all of its messages? This cannot be undone.');
+  if(!ok)return;
+  try{
+    await api("/chats/"+encodeURIComponent(id),{method:"DELETE"});
+    if(currentChat?.id===id)newChat();
+    chats=chats.filter(c=>c.id!==id);renderChatSelect();
+    await Promise.all([loadChats(),loadUsage()]);flashStatus("Chat deleted");
+  }catch(e){alert("Could not delete chat:\n\n"+e.message);}
+}
 async function openChat(id){
   try{
     const d=await api("/chats/"+encodeURIComponent(id));currentChat=d.chat;messages=Array.isArray(d.messages)?d.messages:[];
     if(currentChat.project_id&&currentChat.project_id!==currentProject?.id) await openProject(currentChat.project_id);
-    renderChatSelect();renderMessages();updateChatUsage();closeRightOnMobile();
+    renderChatSelect();renderMessages();updateChatUsage();closeRightOnMobile();closeLeftOnMobile();
   }catch(e){alert(e.message);}
 }
 
@@ -696,6 +775,14 @@ function promptKeydown(e){if(e.key==="Enter"&&!e.shiftKey){e.preventDefault();se
 function resizePrompt(){const p=document.getElementById("prompt");p.style.height="auto";p.style.height=Math.min(170,p.scrollHeight)+"px";}
 function setStatus(text,type=""){const el=document.getElementById("statusLeft");el.textContent=text;el.style.color=type==="error"?"var(--red)":"var(--muted)";}
 function flashStatus(text){setStatus(text);setTimeout(()=>setStatus("Ready"),2500);}
+function showSidebarPane(name){
+  const chats=name==="chats";
+  document.getElementById("explorerPane").classList.toggle("hidden",chats);
+  document.getElementById("chatsPane").classList.toggle("hidden",!chats);
+  document.getElementById("explorerTab").classList.toggle("active",!chats);
+  document.getElementById("chatsTab").classList.toggle("active",chats);
+  if(chats)renderLeftChats();
+}
 function toggleLeft(){document.getElementById("leftPanel").classList.toggle("open")}
 function toggleRight(){document.getElementById("rightPanel").classList.toggle("open")}
 function closeLeftOnMobile(){if(innerWidth<=680)document.getElementById("leftPanel").classList.remove("open")}
