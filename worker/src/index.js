@@ -1780,6 +1780,13 @@ When the user asks you to change project files:
 For ordinary questions that do not modify project files,
 respond normally using Markdown.
 
+RESPONSE FORMATTING RULES:
+- Use standard GitHub-Flavored Markdown only.
+- Do not use raw HTML tags such as <br> for line breaks.
+- Markdown tables must include a normal header row and separator row.
+- For fenced code blocks, put the language on the opening fence and start the code on the next real line.
+- Do not imitate Markdown with doubled pipes or HTML line-break text.
+
 `;
 
 
