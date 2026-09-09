@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<title>CodePilot v2.1.1</title>
+<title>CodePilot v2.2.1</title>
 <style>
 *{box-sizing:border-box}html,body{margin:0;width:100%;height:100%;overflow:hidden}
 :root{
@@ -25,6 +25,9 @@ button,input,textarea,select{font:inherit}button{cursor:pointer}.hidden{display:
 .sidebar-tab{border:1px solid transparent;border-radius:7px;padding:7px 5px;background:transparent;color:var(--muted);font-size:10px;font-weight:700}
 .sidebar-tab:hover{background:var(--panel2);color:#fff}.sidebar-tab.active{border-color:var(--border);background:var(--panel3);color:#fff}
 .sidebar-pane{flex:1;min-height:0;display:flex;flex-direction:column}
+.project-chat-list{flex:0 1 34%;min-height:72px;max-height:34vh;border-top:1px solid var(--border2)}
+.context-switch{display:flex;gap:4px;align-items:center}.context-btn{border:1px solid var(--border);background:var(--panel3);color:var(--muted);border-radius:7px;padding:6px 8px;font-size:9px;font-weight:700}.context-btn:hover{color:#fff}.context-btn.active{background:var(--accent);border-color:var(--accent);color:#fff}
+.auth-note{font-size:9px;color:var(--muted);line-height:1.5;margin-top:8px}.brand-spacer{flex:1}.logout-btn{border:0;background:transparent;color:var(--muted);font-size:9px;padding:5px 6px;border-radius:6px}.logout-btn:hover{background:var(--panel3);color:#fff}
 .icon-btn{border:0;background:transparent;color:var(--muted);border-radius:6px;padding:4px 7px}.icon-btn:hover{background:var(--panel3);color:#fff}
 .project-bar{padding:8px 10px 10px;border-bottom:1px solid var(--border2)}
 .project-select{width:100%;padding:9px 10px;border:1px solid var(--border);border-radius:8px;background:var(--panel2);color:#fff;outline:0}
@@ -129,11 +132,11 @@ button,input,textarea,select{font:inherit}button{cursor:pointer}.hidden{display:
 <div class="app">
 
 <aside id="leftPanel" class="left">
-  <div class="brand"><div class="logo">&lt;/&gt;</div><strong>CodePilot</strong></div>
+  <div class="brand"><div class="logo">&lt;/&gt;</div><strong>CodePilot</strong><span class="brand-spacer"></span><button id="logoutButton" class="logout-btn hidden" onclick="logout()" title="Sign out">Sign out</button></div>
 
   <div class="sidebar-tabs">
-    <button id="explorerTab" class="sidebar-tab active" onclick="showSidebarPane('explorer')">Explorer</button>
-    <button id="chatsTab" class="sidebar-tab" onclick="showSidebarPane('chats')">Chats</button>
+    <button id="explorerTab" class="sidebar-tab active" onclick="switchChatContext('project')">Explorer</button>
+    <button id="chatsTab" class="sidebar-tab" onclick="switchChatContext('standalone')">Chats</button>
   </div>
 
   <div id="explorerPane" class="sidebar-pane">
@@ -160,12 +163,20 @@ button,input,textarea,select{font:inherit}button{cursor:pointer}.hidden{display:
     <div id="fileList" class="files">
       <div style="padding:14px;color:var(--muted2);font-size:11px">Create or open a project.</div>
     </div>
+
+    <div class="section-head">
+      <span>PROJECT CHATS</span>
+      <button class="icon-btn" onclick="newProjectChat()" title="New chat for this project">＋</button>
+    </div>
+    <div id="projectChatList" class="files project-chat-list">
+      <div style="padding:12px;color:var(--muted2);font-size:10px">Choose a project to see its chats.</div>
+    </div>
   </div>
 
   <div id="chatsPane" class="sidebar-pane hidden">
     <div class="section-head">
-      <span>CHAT SESSIONS</span>
-      <button class="icon-btn" onclick="newChat()" title="New chat">＋</button>
+      <span>STANDALONE CHATS</span>
+      <button class="icon-btn" onclick="newStandaloneChat()" title="New standalone chat">＋</button>
     </div>
     <div id="leftChatList" class="files">
       <div style="padding:14px;color:var(--muted2);font-size:11px">No chat sessions yet.</div>
@@ -208,7 +219,7 @@ button,input,textarea,select{font:inherit}button{cursor:pointer}.hidden{display:
 
     <footer class="statusbar">
       <span id="statusLeft">Ready</span>
-      <span id="statusRight">CodePilot v2.1</span>
+      <span id="statusRight">CodePilot v2.2</span>
     </footer>
   </div>
 
@@ -244,6 +255,10 @@ button,input,textarea,select{font:inherit}button{cursor:pointer}.hidden{display:
       <textarea id="prompt" class="prompt" placeholder="Ask CodePilot about this project..."
         oninput="resizePrompt()" onkeydown="promptKeydown(event)"></textarea>
       <div class="composer-bottom">
+        <div class="context-switch" aria-label="Chat context">
+          <button id="quickProjectButton" class="context-btn active" onclick="switchChatContext('project')" title="Project chats">Explorer</button>
+          <button id="quickStandaloneButton" class="context-btn" onclick="switchChatContext('standalone')" title="Standalone chats">Chats</button>
+        </div>
         <select id="language" class="lang" aria-label="Preferred programming language">
           <option value="auto">Auto</option><option value="html">HTML/CSS</option>
           <option value="javascript">JavaScript</option><option value="python">Python</option>
@@ -274,6 +289,20 @@ button,input,textarea,select{font:inherit}button{cursor:pointer}.hidden{display:
 
 <div id="leftResizer" class="resizer resizer-left" role="separator" tabindex="0" aria-label="Resize workspace and chat panels" aria-orientation="vertical"></div>
 <div id="rightResizer" class="resizer resizer-right" role="separator" tabindex="0" aria-label="Resize chat and preview panels" aria-orientation="vertical"></div>
+</div>
+
+
+<!-- authentication modal -->
+<div id="authModal" class="modal-bg hidden">
+  <div class="modal">
+    <h3>Unlock CodePilot</h3>
+    <p>This private workspace is protected by your Cloudflare Worker password.</p>
+    <input id="authPassword" type="password" autocomplete="current-password" placeholder="Password" onkeydown="authKeydown(event)">
+    <div id="authError" class="auth-note"></div>
+    <div class="modal-actions">
+      <button id="authButton" class="modal-btn primary" onclick="login()">Unlock</button>
+    </div>
+  </div>
 </div>
 
 <!-- generic input modal -->
@@ -329,14 +358,29 @@ let saveTimer=null, dirty=false, saving=false, generating=false;
 let inputResolve=null, confirmResolve=null, fileMenuTarget=null;
 let healthTimer=null;
 let availableModels=[];
+let authToken="";
+let chatContext="project";
 
 /* =========================================================
    START
 ========================================================= */
-document.addEventListener("DOMContentLoaded", init);
+document.addEventListener("DOMContentLoaded", bootstrap);
+
+async function bootstrap(){
+  setupResizers();
+  loadAccessibilitySettings();
+  try{authToken=sessionStorage.getItem("codepilot-auth-token")||""}catch{}
+  if(authToken){
+    try{
+      const r=await fetch(API_BASE_URL+"/auth/check",{headers:{"Authorization":"Bearer "+authToken},cache:"no-store"});
+      if(r.ok){showAuthenticatedUI();await init();return;}
+    }catch{}
+    clearAuthToken();
+  }
+  showLogin();
+}
 
 async function init(){
-  setupResizers();
   loadAccessibilitySettings();
   if(API_BASE_URL.includes("PASTE_YOUR_WORKER_URL_HERE")){
     setStatus("Worker URL missing","error");
@@ -348,18 +392,43 @@ async function init(){
     if(Number(health.version)!==2) throw new Error("Worker is not Version 2.");
     setWorkerIndicator("online","Online",`Worker and D1 responded in ${Number(health.latencyMs||0)} ms`);
     await Promise.all([loadProjects(),loadChats(),loadUsage(),loadModels(false)]);
+    updateContextUI();renderProjectChats();
     clearInterval(healthTimer);healthTimer=setInterval(()=>checkWorkerHealth(false),60000);
     setStatus("Ready");
   }catch(e){setWorkerIndicator("offline","Offline",e.message);setStatus("Connection error","error"); alert("CodePilot could not start:\\n\\n"+e.message);}
 }
 
 async function api(path,options={}){
-  const r=await fetch(API_BASE_URL+path,options);
+  const headers=new Headers(options.headers||{});
+  if(authToken)headers.set("Authorization","Bearer "+authToken);
+  const r=await fetch(API_BASE_URL+path,{...options,headers});
   const t=await r.text(); let d={};
   try{d=t?JSON.parse(t):{}}catch{throw new Error("Server returned invalid JSON.");}
+  if(r.status===401&&path!=="/auth/login"){clearAuthToken();showLogin();throw new Error("Your CodePilot session expired. Please sign in again.");}
   if(!r.ok) throw new Error(d.error||("HTTP "+r.status));
   return d;
 }
+
+function showLogin(){
+  document.getElementById("authModal").classList.remove("hidden");
+  document.getElementById("logoutButton")?.classList.add("hidden");
+  setTimeout(()=>document.getElementById("authPassword")?.focus(),30);
+}
+function showAuthenticatedUI(){document.getElementById("authModal").classList.add("hidden");document.getElementById("logoutButton")?.classList.remove("hidden");}
+function clearAuthToken(){authToken="";try{sessionStorage.removeItem("codepilot-auth-token")}catch{}}
+async function login(){
+  const input=document.getElementById("authPassword"),button=document.getElementById("authButton"),error=document.getElementById("authError");
+  const password=input.value;if(!password)return;button.disabled=true;error.textContent="Signing in…";
+  try{
+    const r=await fetch(API_BASE_URL+"/auth/login",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({password})});
+    const d=await r.json().catch(()=>({}));if(!r.ok)throw new Error(d.error||"Sign-in failed.");
+    authToken=d.token||"";if(!authToken)throw new Error("Worker did not return a session token.");
+    try{sessionStorage.setItem("codepilot-auth-token",authToken)}catch{}
+    input.value="";error.textContent="";showAuthenticatedUI();await init();
+  }catch(e){error.textContent=e.message;}finally{button.disabled=false;}
+}
+function authKeydown(e){if(e.key==="Enter"){e.preventDefault();login();}}
+function logout(){clearAuthToken();currentChat=null;messages=[];showLogin();}
 
 function setWorkerIndicator(state,label,title=""){
   const el=document.getElementById("workerStatus");if(!el)return;
@@ -369,7 +438,7 @@ function setWorkerIndicator(state,label,title=""){
 async function checkWorkerHealth(deep=false){
   const started=performance.now();setWorkerIndicator("checking","Checking","Checking Worker status…");
   try{
-    const r=await fetch(API_BASE_URL+(deep?"/diagnostics":"/health"),{cache:"no-store",signal:AbortSignal.timeout(deep?12000:6000)});
+    const r=await fetch(API_BASE_URL+(deep?"/diagnostics":"/health"),{cache:"no-store",headers:authToken?{"Authorization":"Bearer "+authToken}:{},signal:AbortSignal.timeout(deep?12000:6000)});
     const text=await r.text();let data={};try{data=text?JSON.parse(text):{}}catch{throw new Error("Worker returned invalid JSON.")}
     if(!r.ok)throw new Error(data.error||"Diagnostic check failed with HTTP "+r.status+".");
     const elapsed=Math.round(performance.now()-started);
@@ -408,8 +477,10 @@ function renderProjectSelect(){
 
 async function projectSelectChanged(){
   const id=document.getElementById("projectSelect").value;
-  if(!id){await forceSaveActive();clearProject();return;}
+  if(!id){await forceSaveActive();clearProject();renderProjectChats();return;}
   await openProject(id);
+  chatContext="project";updateContextUI();renderProjectChats();
+  await openMostRecentContextChat();
 }
 
 async function openProject(id,preferredFileId=null){
@@ -418,7 +489,7 @@ async function openProject(id,preferredFileId=null){
     setStatus("Loading project…");
     const d=await api("/projects/"+encodeURIComponent(id));
     currentProject=d.project; files=Array.isArray(d.files)?d.files:[];
-    renderProjectSelect(); renderFiles();
+    renderProjectSelect(); renderFiles(); renderProjectChats();
     document.getElementById("aiProjectLabel").textContent=currentProject.name;
     if(files.length){
       let target=preferredFileId?files.find(f=>f.id===preferredFileId):null;
@@ -433,7 +504,7 @@ async function openProject(id,preferredFileId=null){
 
 function clearProject(){
   currentProject=null;files=[];activeFile=null;dirty=false;
-  renderProjectSelect();renderFiles();clearEditor();
+  renderProjectSelect();renderFiles();renderProjectChats();clearEditor();
   document.getElementById("aiProjectLabel").textContent="No project attached";
   showPreviewPlaceholder("Open a project with an index.html file to see its preview.");
 }
@@ -676,32 +747,38 @@ function buildPreview(){
 async function loadChats(){
   const d=await api("/chats");chats=Array.isArray(d.chats)?d.chats:[];renderChatSelect();
 }
+function contextChats(){
+  if(chatContext==="standalone")return chats.filter(c=>!c.project_id);
+  if(!currentProject)return [];
+  return chats.filter(c=>c.project_id===currentProject.id);
+}
 function renderChatSelect(){
-  const s=document.getElementById("chatSelect");const id=currentChat?.id||"";
-  s.innerHTML='<option value="">New Chat</option>';
-  chats.forEach(c=>{
-    const o=document.createElement("option");o.value=c.id;o.textContent=c.title||"New Chat";s.appendChild(o);
-  });s.value=id;renderLeftChats();
+  const s=document.getElementById("chatSelect");const id=currentChat?.id||"";const list=contextChats();
+  s.innerHTML='<option value="">'+(chatContext==="project"?'New Project Chat':'New Standalone Chat')+'</option>';
+  list.forEach(c=>{const o=document.createElement("option");o.value=c.id;o.textContent=c.title||"New Chat";s.appendChild(o);});
+  s.value=list.some(c=>c.id===id)?id:"";renderLeftChats();renderProjectChats();updateContextUI();
+}
+function createChatRow(chat){
+  const row=document.createElement("div");row.className="file-row"+(currentChat?.id===chat.id?" active":"");row.onclick=()=>openChat(chat.id);
+  const icon=document.createElement("span");icon.className="file-icon";icon.textContent="AI";
+  const name=document.createElement("span");name.className="file-name";name.textContent=chat.title||"New Chat";
+  const actions=document.createElement("span");actions.className="chat-row-actions";
+  const rename=document.createElement("button");rename.className="chat-action";rename.title="Rename chat";rename.textContent="✎";rename.onclick=e=>{e.stopPropagation();renameChatById(chat.id)};
+  const remove=document.createElement("button");remove.className="chat-action danger";remove.title="Delete chat";remove.textContent="⌫";remove.onclick=e=>{e.stopPropagation();deleteChatById(chat.id)};
+  actions.append(rename,remove);row.append(icon,name,actions);return row;
 }
 function renderLeftChats(){
-  const list=document.getElementById("leftChatList");if(!list)return;
-  list.innerHTML="";
-  if(!chats.length){
-    list.innerHTML='<div style="padding:14px;color:var(--muted2);font-size:11px;line-height:1.5">No chat sessions yet.<br>Start one with the ＋ button.</div>';
-    return;
-  }
-  chats.forEach(chat=>{
-    const row=document.createElement("div");row.className="file-row"+(currentChat?.id===chat.id?" active":"");
-    row.onclick=()=>openChat(chat.id);
-    const icon=document.createElement("span");icon.className="file-icon";icon.textContent="AI";
-    const name=document.createElement("span");name.className="file-name";name.textContent=chat.title||"New Chat";
-    const actions=document.createElement("span");actions.className="chat-row-actions";
-    const rename=document.createElement("button");rename.className="chat-action";rename.title="Rename chat";rename.textContent="✎";
-    rename.onclick=e=>{e.stopPropagation();renameChatById(chat.id)};
-    const remove=document.createElement("button");remove.className="chat-action danger";remove.title="Delete chat";remove.textContent="⌫";
-    remove.onclick=e=>{e.stopPropagation();deleteChatById(chat.id)};
-    actions.append(rename,remove);row.append(icon,name,actions);list.appendChild(row);
-  });
+  const list=document.getElementById("leftChatList");if(!list)return;list.innerHTML="";
+  const standalone=chats.filter(c=>!c.project_id);
+  if(!standalone.length){list.innerHTML='<div style="padding:14px;color:var(--muted2);font-size:11px;line-height:1.5">No standalone chats yet.<br>Start one with the ＋ button.</div>';return;}
+  standalone.forEach(chat=>list.appendChild(createChatRow(chat)));
+}
+function renderProjectChats(){
+  const list=document.getElementById("projectChatList");if(!list)return;list.innerHTML="";
+  if(!currentProject){list.innerHTML='<div style="padding:12px;color:var(--muted2);font-size:10px">Choose a project to see its chats.</div>';return;}
+  const projectChats=chats.filter(c=>c.project_id===currentProject.id);
+  if(!projectChats.length){list.innerHTML='<div style="padding:12px;color:var(--muted2);font-size:10px">No chats for this project yet.</div>';return;}
+  projectChats.forEach(chat=>list.appendChild(createChatRow(chat)));
 }
 async function chatSelectChanged(){
   const id=document.getElementById("chatSelect").value;if(!id){newChat();return;}
@@ -709,6 +786,24 @@ async function chatSelectChanged(){
 }
 function newChat(){
   currentChat=null;messages=[];renderChatSelect();renderMessages();updateChatUsage();
+}
+function newProjectChat(){
+  if(!currentProject)return alert("Choose a project first.");chatContext="project";showSidebarPane("explorer");newChat();updateContextUI();
+}
+function newStandaloneChat(){chatContext="standalone";showSidebarPane("chats");newChat();updateContextUI();}
+async function openMostRecentContextChat(){
+  const list=contextChats();
+  if(list.length){await openChat(list[0].id);}else{newChat();}
+}
+async function switchChatContext(mode){
+  chatContext=mode==="standalone"?"standalone":"project";showSidebarPane(chatContext==="project"?"explorer":"chats");updateContextUI();
+  await openMostRecentContextChat();
+}
+function updateContextUI(){
+  const project=chatContext==="project";
+  document.getElementById("explorerTab")?.classList.toggle("active",project);document.getElementById("chatsTab")?.classList.toggle("active",!project);
+  document.getElementById("quickProjectButton")?.classList.toggle("active",project);document.getElementById("quickStandaloneButton")?.classList.toggle("active",!project);
+  const label=document.getElementById("aiProjectLabel");if(label)label.textContent=project?(currentProject?.name||"No project attached"):"Standalone chat";
 }
 async function renameChat(){
   if(!currentChat)return alert("Open an existing chat first.");
@@ -746,8 +841,9 @@ async function deleteChatById(id){
 async function openChat(id){
   try{
     const d=await api("/chats/"+encodeURIComponent(id));currentChat=d.chat;messages=Array.isArray(d.messages)?d.messages:[];
+    chatContext=currentChat.project_id?"project":"standalone";
     if(currentChat.project_id&&currentChat.project_id!==currentProject?.id) await openProject(currentChat.project_id);
-    renderChatSelect();renderMessages();updateChatUsage();closeLeftOnMobile();
+    showSidebarPane(chatContext==="project"?"explorer":"chats");renderChatSelect();renderMessages();updateChatUsage();updateContextUI();closeLeftOnMobile();
   }catch(e){alert(e.message);}
 }
 
@@ -932,7 +1028,7 @@ async function sendMessage(){
   if(generating)return;
   const p=document.getElementById("prompt"),prompt=p.value.trim();if(!prompt)return;
   const continuingNormalChat=Boolean(currentChat?.id&&!currentChat?.project_id);
-  if(!currentProject&&!continuingNormalChat){
+  if(chatContext==="project"&&!currentProject&&!continuingNormalChat){
     const go=await askConfirm("Start normal chat?","This new chat will continue without project files.");
     if(!go)return;
   }
@@ -943,7 +1039,7 @@ async function sendMessage(){
     const think=addThinking();
     const d=await api("/chat",{
       method:"POST",headers:{"Content-Type":"application/json"},signal:AbortSignal.timeout(130000),
-      body:JSON.stringify({chatId:currentChat?.id||"",projectId:currentProject?.id||"",prompt,language:document.getElementById("language").value,model:document.getElementById("modelSelect")?.value||"openrouter/free"})
+      body:JSON.stringify({chatId:currentChat?.id||"",projectId:chatContext==="project"?(currentProject?.id||""):"",prompt,language:document.getElementById("language").value,model:document.getElementById("modelSelect")?.value||"openrouter/free"})
     });
     removeThinking(think);
     currentChat=d.chat||{id:d.chatId,title:"New Chat",total_tokens:0};
@@ -1072,12 +1168,10 @@ function resizePrompt(){const p=document.getElementById("prompt");p.style.height
 function setStatus(text,type=""){const el=document.getElementById("statusLeft");el.textContent=text;el.style.color=type==="error"?"var(--red)":"var(--muted)";}
 function flashStatus(text){setStatus(text);setTimeout(()=>setStatus("Ready"),2500);}
 function showSidebarPane(name){
-  const chats=name==="chats";
-  document.getElementById("explorerPane").classList.toggle("hidden",chats);
-  document.getElementById("chatsPane").classList.toggle("hidden",!chats);
-  document.getElementById("explorerTab").classList.toggle("active",!chats);
-  document.getElementById("chatsTab").classList.toggle("active",chats);
-  if(chats)renderLeftChats();
+  const isChats=name==="chats";
+  document.getElementById("explorerPane").classList.toggle("hidden",isChats);
+  document.getElementById("chatsPane").classList.toggle("hidden",!isChats);
+  if(isChats)renderLeftChats();else renderProjectChats();
 }
 function setupResizers(){
   const app=document.querySelector(".app"),left=document.getElementById("leftPanel"),workbench=document.querySelector(".center");
