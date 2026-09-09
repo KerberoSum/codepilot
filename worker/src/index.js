@@ -2,12 +2,23 @@ export default {
 
   async fetch(request, env) {
 
+    const requestOrigin = request.headers.get("Origin") || "";
+    const allowedOrigins = String(
+      env.CODEPILOT_ALLOWED_ORIGINS ||
+      "https://kerberosum.github.io,https://kersumcodingbot.netlify.app"
+    ).split(",").map(x => x.trim()).filter(Boolean);
+    const corsOrigin = allowedOrigins.includes(requestOrigin) ? requestOrigin : "";
+
     const corsHeaders = {
-      "Access-Control-Allow-Origin": "*",
+      ...(corsOrigin ? {
+        "Access-Control-Allow-Origin": corsOrigin,
+        "Vary": "Origin"
+      } : {}),
       "Access-Control-Allow-Methods":
         "GET, POST, PUT, PATCH, DELETE, OPTIONS",
       "Access-Control-Allow-Headers":
-        "Content-Type"
+        "Content-Type, Authorization",
+      "Access-Control-Max-Age": "86400"
     };
 
 
@@ -29,7 +40,9 @@ export default {
 
 
     if (request.method === "OPTIONS") {
-
+      if (requestOrigin && !corsOrigin) {
+        return new Response("Origin not allowed", { status: 403 });
+      }
       return new Response(
         null,
         {
@@ -37,7 +50,6 @@ export default {
           headers: corsHeaders
         }
       );
-
     }
 
 
@@ -62,6 +74,105 @@ export default {
 
       const path =
         url.pathname.replace(/\/+$/, "") || "/";
+
+
+      /* =====================================================
+         AUTHENTICATION
+         Single-user login. Password + signing secret live only
+         in Cloudflare Worker secrets, never in GitHub.
+      ===================================================== */
+
+      const textEncoder = new TextEncoder();
+
+      function bytesToBase64Url(bytes) {
+        let s = "";
+        for (const b of bytes) s += String.fromCharCode(b);
+        return btoa(s).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
+      }
+
+      function base64UrlToBytes(value) {
+        const normalized = value.replace(/-/g, "+").replace(/_/g, "/");
+        const padded = normalized + "=".repeat((4 - normalized.length % 4) % 4);
+        const raw = atob(padded);
+        return Uint8Array.from(raw, ch => ch.charCodeAt(0));
+      }
+
+      async function sha256(value) {
+        return new Uint8Array(await crypto.subtle.digest("SHA-256", textEncoder.encode(String(value))));
+      }
+
+      function constantTimeEqual(a, b) {
+        if (a.length !== b.length) return false;
+        let diff = 0;
+        for (let i = 0; i < a.length; i++) diff |= a[i] ^ b[i];
+        return diff === 0;
+      }
+
+      async function signSession(payload) {
+        const key = await crypto.subtle.importKey(
+          "raw",
+          textEncoder.encode(String(env.CODEPILOT_SESSION_SECRET || "")),
+          { name: "HMAC", hash: "SHA-256" },
+          false,
+          ["sign"]
+        );
+        return new Uint8Array(await crypto.subtle.sign("HMAC", key, textEncoder.encode(payload)));
+      }
+
+      async function issueSessionToken() {
+        const expiresAt = Date.now() + 12 * 60 * 60 * 1000;
+        const nonce = crypto.randomUUID();
+        const payload = `${expiresAt}.${nonce}`;
+        const signature = await signSession(payload);
+        return { token: `${payload}.${bytesToBase64Url(signature)}`, expiresAt };
+      }
+
+      async function verifySessionToken(token) {
+        try {
+          if (!env.CODEPILOT_SESSION_SECRET) return false;
+          const parts = String(token || "").split(".");
+          if (parts.length !== 3) return false;
+          const [expiresText, nonce, signatureText] = parts;
+          const expiresAt = Number(expiresText);
+          if (!Number.isFinite(expiresAt) || expiresAt <= Date.now() || !nonce) return false;
+          const expected = await signSession(`${expiresText}.${nonce}`);
+          const actual = base64UrlToBytes(signatureText);
+          return constantTimeEqual(expected, actual);
+        } catch {
+          return false;
+        }
+      }
+
+      async function requestIsAuthenticated() {
+        const header = request.headers.get("Authorization") || "";
+        const match = header.match(/^Bearer\s+(.+)$/i);
+        return Boolean(match && await verifySessionToken(match[1]));
+      }
+
+      if (path === "/auth/login" && request.method === "POST") {
+        if (!env.CODEPILOT_PASSWORD || !env.CODEPILOT_SESSION_SECRET) {
+          return json({ success: false, error: "CodePilot authentication secrets are not configured." }, 500);
+        }
+        const body = await safeJSON(request);
+        const supplied = await sha256(String(body?.password || ""));
+        const expected = await sha256(String(env.CODEPILOT_PASSWORD));
+        if (!constantTimeEqual(supplied, expected)) {
+          await new Promise(resolve => setTimeout(resolve, 250));
+          return json({ success: false, error: "Incorrect password." }, 401);
+        }
+        const session = await issueSessionToken();
+        return json({ success: true, ...session });
+      }
+
+      if (path === "/auth/check" && request.method === "GET") {
+        const ok = await requestIsAuthenticated();
+        return json({ success: ok }, ok ? 200 : 401);
+      }
+
+      const publicRoute = (path === "/" || path === "/health");
+      if (!publicRoute && !(await requestIsAuthenticated())) {
+        return json({ success: false, error: "Authentication required." }, 401);
+      }
 
 
       /* =====================================================
