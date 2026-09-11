@@ -321,6 +321,197 @@ export default {
 
 
       /* =====================================================
+         D1 STORAGE INSPECTION
+         GET /storage
+         Authenticated. Reports a conservative CodePilot app
+         data estimate and item sizes for cleanup. It does not
+         call the Cloudflare account Analytics API.
+      ===================================================== */
+
+      if (
+        path === "/storage" &&
+        request.method === "GET"
+      ) {
+
+        const limitBytes = 500 * 1024 * 1024;
+        const detailed = url.searchParams.get("detail") === "1";
+
+        const summaryStatement = env.DB.prepare(`
+          SELECT
+            (SELECT COUNT(*) FROM projects) AS project_count,
+            (SELECT COUNT(*) FROM project_files) AS file_count,
+            (SELECT COUNT(*) FROM chats) AS chat_count,
+            (SELECT COUNT(*) FROM messages) AS message_count,
+            COALESCE((SELECT SUM(
+              LENGTH(CAST(id AS BLOB)) +
+              LENGTH(CAST(name AS BLOB)) +
+              LENGTH(CAST(description AS BLOB))
+            ) FROM projects), 0) +
+            COALESCE((SELECT SUM(
+              LENGTH(CAST(id AS BLOB)) +
+              LENGTH(CAST(project_id AS BLOB)) +
+              LENGTH(CAST(name AS BLOB)) +
+              LENGTH(CAST(content AS BLOB)) +
+              LENGTH(CAST(language AS BLOB))
+            ) FROM project_files), 0) +
+            COALESCE((SELECT SUM(
+              LENGTH(CAST(id AS BLOB)) +
+              LENGTH(CAST(title AS BLOB))
+            ) FROM chats), 0) +
+            COALESCE((SELECT SUM(
+              LENGTH(CAST(id AS BLOB)) +
+              LENGTH(CAST(chat_id AS BLOB)) +
+              LENGTH(CAST(role AS BLOB)) +
+              LENGTH(CAST(content AS BLOB))
+            ) FROM messages), 0) +
+            COALESCE((SELECT SUM(
+              LENGTH(CAST(chat_id AS BLOB)) +
+              LENGTH(CAST(project_id AS BLOB))
+            ) FROM chat_projects), 0) AS content_bytes
+        `);
+
+        const makeBase = (summaryResult, inspectionRowsRead = 0) => {
+          const summary = summaryResult?.results?.[0] || {};
+          const counts = {
+            projects: Number(summary.project_count || 0),
+            files: Number(summary.file_count || 0),
+            chats: Number(summary.chat_count || 0),
+            messages: Number(summary.message_count || 0)
+          };
+          const contentBytes = Number(summary.content_bytes || 0);
+          const rowCount = counts.projects + counts.files + counts.chats + counts.messages;
+          const estimatedBytes = Math.min(
+            limitBytes,
+            contentBytes + (rowCount * 256) + 12288
+          );
+          return {
+            success: true,
+            limitBytes,
+            contentBytes,
+            estimatedBytes,
+            remainingBytes: Math.max(0, limitBytes - estimatedBytes),
+            counts,
+            inspectionRowsRead,
+            note: "Estimated app footprint only; use Cloudflare Analytics databaseSizeBytes for authoritative physical database size."
+          };
+        };
+
+        if (!detailed) {
+          const summaryResult = await summaryStatement.all();
+          return json(makeBase(summaryResult, Number(summaryResult?.meta?.rows_read || 0)));
+        }
+
+        const results = await env.DB.batch([
+          summaryStatement,
+
+          env.DB.prepare(`
+            WITH file_usage AS (
+              SELECT
+                project_id,
+                COUNT(*) AS file_count,
+                COALESCE(SUM(
+                  LENGTH(CAST(name AS BLOB)) +
+                  LENGTH(CAST(content AS BLOB)) +
+                  LENGTH(CAST(language AS BLOB))
+                ), 0) AS file_bytes
+              FROM project_files
+              GROUP BY project_id
+            ),
+            chat_usage AS (
+              SELECT
+                cp.project_id,
+                COUNT(DISTINCT c.id) AS chat_count,
+                COALESCE(SUM(LENGTH(CAST(m.content AS BLOB))), 0) AS chat_bytes
+              FROM chat_projects cp
+              JOIN chats c ON c.id = cp.chat_id
+              LEFT JOIN messages m ON m.chat_id = c.id
+              GROUP BY cp.project_id
+            )
+            SELECT
+              p.id,
+              p.name,
+              COALESCE(f.file_count, 0) AS file_count,
+              COALESCE(c.chat_count, 0) AS chat_count,
+              COALESCE(f.file_bytes, 0) + COALESCE(c.chat_bytes, 0) AS bytes
+            FROM projects p
+            LEFT JOIN file_usage f ON f.project_id = p.id
+            LEFT JOIN chat_usage c ON c.project_id = p.id
+            ORDER BY bytes DESC, p.updated_at DESC
+            LIMIT 50
+          `),
+
+          env.DB.prepare(`
+            WITH message_usage AS (
+              SELECT
+                chat_id,
+                COUNT(*) AS message_count,
+                COALESCE(SUM(LENGTH(CAST(content AS BLOB))), 0) AS message_bytes
+              FROM messages
+              GROUP BY chat_id
+            )
+            SELECT
+              c.id,
+              c.title,
+              cp.project_id,
+              p.name AS project_name,
+              COALESCE(m.message_count, 0) AS message_count,
+              COALESCE(m.message_bytes, 0) + LENGTH(CAST(c.title AS BLOB)) AS bytes
+            FROM chats c
+            LEFT JOIN message_usage m ON m.chat_id = c.id
+            LEFT JOIN chat_projects cp ON cp.chat_id = c.id
+            LEFT JOIN projects p ON p.id = cp.project_id
+            ORDER BY bytes DESC, c.updated_at DESC
+            LIMIT 100
+          `),
+
+          env.DB.prepare(`
+            SELECT
+              f.id,
+              f.project_id,
+              f.name,
+              p.name AS project_name,
+              LENGTH(CAST(f.content AS BLOB)) + LENGTH(CAST(f.name AS BLOB)) AS bytes
+            FROM project_files f
+            LEFT JOIN projects p ON p.id = f.project_id
+            ORDER BY bytes DESC
+            LIMIT 50
+          `)
+        ]);
+
+        const inspectionRowsRead = results.reduce(
+          (sum, result) => sum + Number(result?.meta?.rows_read || 0),
+          0
+        );
+        const payload = makeBase(results[0], inspectionRowsRead);
+
+        payload.projects = (results?.[1]?.results || []).map(x => ({
+          id: x.id,
+          name: x.name,
+          fileCount: Number(x.file_count || 0),
+          chatCount: Number(x.chat_count || 0),
+          bytes: Number(x.bytes || 0)
+        }));
+        payload.chats = (results?.[2]?.results || []).map(x => ({
+          id: x.id,
+          title: x.title,
+          projectId: x.project_id || "",
+          projectName: x.project_name || "",
+          messageCount: Number(x.message_count || 0),
+          bytes: Number(x.bytes || 0)
+        }));
+        payload.largestFiles = (results?.[3]?.results || []).map(x => ({
+          id: x.id,
+          projectId: x.project_id,
+          name: x.name,
+          projectName: x.project_name || "",
+          bytes: Number(x.bytes || 0)
+        }));
+
+        return json(payload);
+
+      }
+
+      /* =====================================================
          PROJECT LIST
          GET /projects
       ===================================================== */
@@ -1535,6 +1726,54 @@ export default {
           );
 
 
+        const allowedAttachmentExtensions =
+          new Set([
+            "html", "htm", "css", "js", "mjs", "cjs",
+            "ts", "jsx", "tsx", "json", "md", "txt",
+            "py", "sql", "xml", "yaml", "yml", "csv"
+          ]);
+
+
+        const rawAttachments =
+          Array.isArray(body?.attachments)
+            ? body.attachments
+            : [];
+
+
+        if (rawAttachments.length > 5) {
+          return json({ success: false, error: "A maximum of 5 temporary attachments is allowed per request." }, 400);
+        }
+
+
+        const attachments = [];
+        let attachmentTotalBytes = 0;
+
+
+        for (const item of rawAttachments) {
+          const name = cleanFileName(item?.name);
+          const content = String(item?.content ?? "");
+          const extension = name.includes(".") ? name.split(".").pop().toLowerCase() : "";
+          const bytes = textEncoder.encode(content).byteLength;
+
+          if (!name || !allowedAttachmentExtensions.has(extension)) {
+            return json({ success: false, error: "Unsupported temporary attachment: " + String(item?.name || "unnamed file") }, 400);
+          }
+          if (bytes > 500 * 1024) {
+            return json({ success: false, error: "Temporary attachment is larger than 500 KB: " + name }, 400);
+          }
+          if (content.includes("\0")) {
+            return json({ success: false, error: "Binary files are not supported as temporary attachments: " + name }, 400);
+          }
+
+          attachmentTotalBytes += bytes;
+          if (attachmentTotalBytes > 1024 * 1024) {
+            return json({ success: false, error: "Combined temporary attachments exceed the 1 MB request limit." }, 400);
+          }
+
+          attachments.push({ name, content, bytes });
+        }
+
+
         const requestedModel =
           String(
             body?.model ||
@@ -1845,6 +2084,31 @@ ${project.name}
 
 
         /*
+          Temporary attachments. These are request-only and are
+          deliberately not inserted into D1 or conversation history.
+        */
+
+        let attachmentContext = "";
+
+        if (attachments.length) {
+          attachmentContext += `
+
+TEMPORARY USER ATTACHMENTS:
+These files were attached only for this request. Review them as requested.
+Do not assume they are stored in the current project, and do not modify
+project files merely because an attachment has the same filename.
+
+`;
+
+          for (const attachment of attachments) {
+            attachmentContext +=
+              `===== TEMP ATTACHMENT: ${attachment.name} =====\n` +
+              `${attachment.content}\n\n`;
+          }
+        }
+
+
+        /*
           System prompt
         */
 
@@ -1918,6 +2182,10 @@ ${language}
 
         systemPrompt +=
           projectContext;
+
+
+        systemPrompt +=
+          attachmentContext;
 
 
         /*

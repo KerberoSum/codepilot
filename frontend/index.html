@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<title>CodePilot v2.2.1</title>
+<title>CodePilot v2.3</title>
 <style>
 *{box-sizing:border-box}html,body{margin:0;width:100%;height:100%;overflow:hidden}
 :root{
@@ -41,6 +41,8 @@ button,input,textarea,select{font:inherit}button{cursor:pointer}.hidden{display:
 .file-row:hover .chat-action,.file-row.active .chat-action{opacity:1}.chat-action:hover{background:var(--border);color:#fff}.chat-action.danger:hover{background:#632837;color:#ffb4c0}
 .left-usage{border-top:1px solid var(--border);padding:10px 12px}.usage-row{display:flex;justify-content:space-between;gap:8px;font-size:10px;padding:3px 0;color:var(--muted)}
 .usage-row b{color:var(--text);font-weight:600}
+
+.storage-row{width:100%;display:flex;justify-content:space-between;gap:8px;align-items:center;border:0;background:transparent;color:var(--muted);font-size:10px;padding:4px 0;text-align:left}.storage-row:hover{color:#fff}.storage-row b{color:var(--text);font-weight:600}.storage-alert{margin-top:7px;padding:7px 8px;border-radius:7px;font-size:9px;line-height:1.45;border:1px solid rgba(241,199,91,.35);background:rgba(241,199,91,.08);color:#efd887}.storage-alert.high{border-color:rgba(255,102,125,.45);background:rgba(255,102,125,.09);color:#ffabb9}
 
 /* RIGHT WORKBENCH */
 .center{grid-area:workbench;height:100%;min-width:0;min-height:0;overflow:hidden;display:flex;flex-direction:column;background:var(--editor)}
@@ -89,6 +91,7 @@ button,input,textarea,select{font:inherit}button{cursor:pointer}.hidden{display:
 .typing{display:flex;align-items:center;gap:4px;padding-top:4px}.typing i{width:5px;height:5px;border-radius:50%;background:var(--muted);animation:b 1.1s infinite}.typing i:nth-child(2){animation-delay:.14s}.typing i:nth-child(3){animation-delay:.28s}.typing-copy{margin-left:5px;color:var(--muted);font-size:9px}.typing-time{color:var(--yellow);font-variant-numeric:tabular-nums}@keyframes b{50%{transform:translateY(-4px)}}
 .composer-wrap{position:relative;flex:0 0 auto;width:100%;min-width:0;padding:10px;background:var(--panel);border-top:1px solid var(--border2)}
 .composer{border:1px solid var(--border);border-radius:12px;background:var(--panel2);overflow:hidden;pointer-events:auto}
+.attachment-tray{display:flex;flex-wrap:wrap;gap:6px;padding:8px 9px 0}.attachment-chip{display:flex;align-items:center;gap:6px;max-width:100%;border:1px solid var(--border);background:#0d1420;border-radius:8px;padding:5px 7px;font-size:9px;color:#cbd5e2}.attachment-chip-name{max-width:180px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:#fff}.attachment-chip-size{color:var(--muted)}.attachment-remove{border:0;background:transparent;color:var(--muted);padding:0 2px;font-size:12px;line-height:1}.attachment-remove:hover{color:var(--red)}.attach-btn{border:1px solid var(--border);background:var(--panel3);color:var(--muted);border-radius:7px;padding:6px 8px;font-size:9px}.attach-btn:hover{color:#fff;background:var(--border)}.attachment-note{margin-top:6px;color:var(--muted);font-size:9px;line-height:1.45}
 .prompt{width:100%;min-height:64px;max-height:170px;resize:none;border:0;outline:0;background:transparent;color:#fff;padding:11px;font-size:11px;line-height:1.5}
 .composer-bottom{display:flex;align-items:center;gap:6px;padding:6px;flex-wrap:wrap}.lang,.model-select,.access-select{border:1px solid var(--border);background:var(--panel3);color:#fff;border-radius:7px;padding:6px;font-size:9px;min-width:0}
 .lang{max-width:110px}.model-select{flex:1 1 185px;max-width:330px}.access-select{max-width:105px}
@@ -110,6 +113,7 @@ button,input,textarea,select{font:inherit}button{cursor:pointer}.hidden{display:
 .modal h3{margin:0 0 7px;font-size:15px}.modal p{margin:0 0 13px;color:var(--muted);font-size:10px;line-height:1.5}
 .modal input{width:100%;border:1px solid var(--border);background:var(--panel);color:#fff;border-radius:8px;padding:9px;outline:0}.modal input:focus{border-color:var(--accent)}
 .modal-actions{display:flex;justify-content:flex-end;gap:7px;margin-top:13px}.modal-btn{border:1px solid var(--border);border-radius:7px;background:var(--panel3);color:#fff;padding:7px 11px;font-size:10px}.modal-btn.primary{background:var(--accent);border-color:var(--accent)}.modal-btn.danger{color:#fff;background:#9f3144;border-color:#b94358}
+.storage-modal{width:min(820px,100%);max-height:min(86vh,820px);overflow:auto}.storage-summary-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px;margin:12px 0}.storage-card{border:1px solid var(--border);background:var(--panel);border-radius:9px;padding:10px}.storage-card span{display:block;color:var(--muted);font-size:9px;margin-bottom:4px}.storage-card b{font-size:13px;color:#fff}.storage-meter{height:8px;border-radius:999px;background:#080b10;border:1px solid var(--border);overflow:hidden;margin:8px 0}.storage-meter-fill{height:100%;width:0;background:var(--green);transition:.2s}.storage-meter-fill.warn{background:var(--yellow)}.storage-meter-fill.high{background:var(--red)}.storage-explain{color:var(--muted);font-size:9px;line-height:1.5;margin:7px 0 12px}.storage-section{margin-top:14px}.storage-section h4{margin:0 0 6px;font-size:11px;color:#fff}.storage-list{border:1px solid var(--border);border-radius:8px;overflow:hidden}.storage-item{display:grid;grid-template-columns:minmax(0,1fr) auto auto;gap:8px;align-items:center;padding:8px 9px;border-bottom:1px solid var(--border2);font-size:9px}.storage-item:last-child{border-bottom:0}.storage-item-main{min-width:0}.storage-item-title{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:#e8edf5}.storage-item-meta{color:var(--muted);margin-top:2px}.storage-delete{border:1px solid #5d2d38;background:#2a1419;color:#ff9bac;border-radius:6px;padding:4px 7px;font-size:8px}.storage-delete:hover{background:#4a1f29}.storage-empty{padding:9px;color:var(--muted);font-size:9px}@media(max-width:680px){.storage-summary-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.storage-item{grid-template-columns:minmax(0,1fr) auto}.storage-item-size{display:none}}
 
 /* PREVIEW */
 .preview-toolbar{height:34px;display:flex;align-items:center;justify-content:space-between;padding:0 10px;border-bottom:1px solid var(--border);background:var(--panel);color:var(--muted);font-size:10px}
@@ -188,6 +192,8 @@ button,input,textarea,select{font:inherit}button{cursor:pointer}.hidden{display:
     <div class="usage-row"><span>Current chat</span><b id="chatTokens">—</b></div>
     <div class="usage-row"><span>Key today</span><b id="dailyUsage">—</b></div>
     <div class="usage-row"><span>Credit</span><b id="creditUsage">—</b></div>
+    <button class="storage-row" onclick="openStorageManager()" title="Review CodePilot data stored in D1"><span>D1 app data</span><b id="d1StorageUsage">Check</b></button>
+    <div id="storageAlert" class="storage-alert hidden"></div>
   </div>
 </aside>
 
@@ -219,7 +225,7 @@ button,input,textarea,select{font:inherit}button{cursor:pointer}.hidden{display:
 
     <footer class="statusbar">
       <span id="statusLeft">Ready</span>
-      <span id="statusRight">CodePilot v2.2</span>
+      <span id="statusRight">CodePilot v2.3</span>
     </footer>
   </div>
 
@@ -252,6 +258,7 @@ button,input,textarea,select{font:inherit}button{cursor:pointer}.hidden{display:
 
   <div class="composer-wrap">
     <div class="composer">
+      <div id="attachmentTray" class="attachment-tray hidden"></div>
       <textarea id="prompt" class="prompt" placeholder="Ask CodePilot about this project..."
         oninput="resizePrompt()" onkeydown="promptKeydown(event)"></textarea>
       <div class="composer-bottom">
@@ -259,6 +266,8 @@ button,input,textarea,select{font:inherit}button{cursor:pointer}.hidden{display:
           <button id="quickProjectButton" class="context-btn active" onclick="switchChatContext('project')" title="Project chats">Explorer</button>
           <button id="quickStandaloneButton" class="context-btn" onclick="switchChatContext('standalone')" title="Standalone chats">Chats</button>
         </div>
+        <button id="attachButton" class="attach-btn" onclick="document.getElementById('attachmentInput').click()" title="Attach temporary source files for this message">Attach</button>
+        <input id="attachmentInput" class="hidden" type="file" multiple accept=".html,.htm,.css,.js,.mjs,.cjs,.ts,.jsx,.tsx,.json,.md,.txt,.py,.sql,.xml,.yaml,.yml,.csv" onchange="handleAttachmentFiles(event)">
         <select id="language" class="lang" aria-label="Preferred programming language">
           <option value="auto">Auto</option><option value="html">HTML/CSS</option>
           <option value="javascript">JavaScript</option><option value="python">Python</option>
@@ -289,6 +298,30 @@ button,input,textarea,select{font:inherit}button{cursor:pointer}.hidden{display:
 
 <div id="leftResizer" class="resizer resizer-left" role="separator" tabindex="0" aria-label="Resize workspace and chat panels" aria-orientation="vertical"></div>
 <div id="rightResizer" class="resizer resizer-right" role="separator" tabindex="0" aria-label="Resize chat and preview panels" aria-orientation="vertical"></div>
+</div>
+
+
+<!-- D1 storage manager -->
+<div id="storageModal" class="modal-bg hidden" onclick="storageOuter(event)">
+  <div class="modal storage-modal">
+    <h3>D1 Storage Manager</h3>
+    <p>Review CodePilot data stored in Cloudflare D1. Temporary chat attachments are not stored here.</p>
+    <div class="storage-summary-grid">
+      <div class="storage-card"><span>Estimated app data</span><b id="storageUsed">—</b></div>
+      <div class="storage-card"><span>Approx. remaining</span><b id="storageRemaining">—</b></div>
+      <div class="storage-card"><span>Chats / messages</span><b id="storageChatCount">—</b></div>
+      <div class="storage-card"><span>Projects / files</span><b id="storageProjectCount">—</b></div>
+    </div>
+    <div class="storage-meter"><div id="storageMeterFill" class="storage-meter-fill"></div></div>
+    <div id="storageExplain" class="storage-explain">Loading…</div>
+    <div class="storage-section"><h4>Projects</h4><div id="storageProjectList" class="storage-list"><div class="storage-empty">Loading…</div></div></div>
+    <div class="storage-section"><h4>Chats</h4><div id="storageChatList" class="storage-list"><div class="storage-empty">Loading…</div></div></div>
+    <div class="storage-section"><h4>Largest files</h4><div id="storageFileList" class="storage-list"><div class="storage-empty">Loading…</div></div></div>
+    <div class="modal-actions">
+      <button class="modal-btn" onclick="loadStorageSummary(true,true)">Refresh</button>
+      <button class="modal-btn primary" onclick="closeStorageManager()">Close</button>
+    </div>
+  </div>
 </div>
 
 
@@ -360,6 +393,12 @@ let healthTimer=null;
 let availableModels=[];
 let authToken="";
 let chatContext="project";
+let pendingAttachments=[];
+let storageSnapshot=null;
+const ATTACH_MAX_FILES=5;
+const ATTACH_MAX_FILE_BYTES=500*1024;
+const ATTACH_MAX_TOTAL_BYTES=1024*1024;
+const ATTACH_ALLOWED_EXT=new Set(["html","htm","css","js","mjs","cjs","ts","jsx","tsx","json","md","txt","py","sql","xml","yaml","yml","csv"]);
 
 /* =========================================================
    START
@@ -395,6 +434,8 @@ async function init(){
     updateContextUI();renderProjectChats();
     clearInterval(healthTimer);healthTimer=setInterval(()=>checkWorkerHealth(false),60000);
     setStatus("Ready");
+    // One lightweight-on-use storage inspection per sign-in; never poll it repeatedly.
+    setTimeout(()=>loadStorageSummary(false).catch(()=>{}),400);
   }catch(e){setWorkerIndicator("offline","Offline",e.message);setStatus("Connection error","error"); alert("CodePilot could not start:\\n\\n"+e.message);}
 }
 
@@ -858,7 +899,7 @@ function renderMessages(){
   });c.scrollTop=c.scrollHeight;
 }
 
-function addMessage(role,text,tokens=0,scroll=true,updatedFiles=[]){
+function addMessage(role,text,tokens=0,scroll=true,updatedFiles=[],attachmentNames=[]){
   const c=document.getElementById("chatArea"),wrap=document.createElement("div");wrap.className="msg";
   const av=document.createElement("div");av.className="avatar "+(role==="assistant"?"ai":"user");av.textContent=role==="assistant"?"AI":"YOU";
   const body=document.createElement("div");body.className="msg-body";
@@ -866,6 +907,7 @@ function addMessage(role,text,tokens=0,scroll=true,updatedFiles=[]){
   if(tokens){const s=document.createElement("span");s.className="msg-token";s.textContent=formatTokens(tokens)+" tok";head.appendChild(s);}
   body.appendChild(head);
   if(role==="assistant")renderAIText(body,text);else{const t=document.createElement("div");t.className="msg-text";t.textContent=text;body.appendChild(t);}
+  if(role==="user"&&attachmentNames.length){const n=document.createElement("div");n.className="attachment-note";n.textContent="Temporary attachments: "+attachmentNames.join(", ")+" · not stored in D1";body.appendChild(n);}
   if(updatedFiles.length){
     const n=document.createElement("div");n.className="file-update-note";n.textContent="Updated: "+updatedFiles.map(f=>f.name).join(", ");body.appendChild(n);
   }
@@ -1022,11 +1064,56 @@ function appendInlineMarkdown(parent,text){
 function selectNode(el){const r=document.createRange();r.selectNodeContents(el);const s=window.getSelection();s.removeAllRanges();s.addRange(r);}
 
 /* =========================================================
+   TEMPORARY FILE ATTACHMENTS
+   Read locally in the browser and sent only with the current
+   AI request. They are never written to D1.
+========================================================= */
+function attachmentExtension(name){const i=String(name||"").lastIndexOf(".");return i<0?"":name.slice(i+1).toLowerCase();}
+function formatBytes(bytes){const n=Math.max(0,Number(bytes||0));if(n<1024)return n+" B";if(n<1024*1024)return (n/1024).toFixed(n>=100*1024?0:1)+" KB";return (n/(1024*1024)).toFixed(2)+" MB";}
+
+async function handleAttachmentFiles(event){
+  const input=event.target,selected=Array.from(input.files||[]);input.value="";
+  if(!selected.length)return;
+  let next=pendingAttachments.slice();
+  for(const file of selected){
+    if(next.length>=ATTACH_MAX_FILES){alert("You can attach up to "+ATTACH_MAX_FILES+" files per message.");break;}
+    const ext=attachmentExtension(file.name);
+    if(!ATTACH_ALLOWED_EXT.has(ext)){alert('"'+file.name+'" is not a supported text/source file.');continue;}
+    if(file.size>ATTACH_MAX_FILE_BYTES){alert('"'+file.name+'" is too large. Maximum is '+formatBytes(ATTACH_MAX_FILE_BYTES)+" per file.");continue;}
+    const withoutSame=next.filter(x=>x.name!==file.name);
+    const totalWithout=withoutSame.reduce((sum,x)=>sum+Number(x.size||0),0);
+    if(totalWithout+file.size>ATTACH_MAX_TOTAL_BYTES){alert("Combined attachments are limited to "+formatBytes(ATTACH_MAX_TOTAL_BYTES)+" to stay friendly to free-model context limits.");continue;}
+    let content;
+    try{content=await file.text();}catch{alert('Could not read "'+file.name+'".');continue;}
+    if(content.includes("\0")){alert('"'+file.name+'" looks binary and was not attached.');continue;}
+    next=withoutSame.concat({name:file.name,size:file.size,content});
+  }
+  pendingAttachments=next;renderAttachmentTray();
+}
+
+function renderAttachmentTray(){
+  const tray=document.getElementById("attachmentTray");if(!tray)return;tray.innerHTML="";
+  if(!pendingAttachments.length){tray.classList.add("hidden");return;}
+  tray.classList.remove("hidden");
+  pendingAttachments.forEach((file,index)=>{
+    const chip=document.createElement("div");chip.className="attachment-chip";chip.title="Temporary attachment — sent to the selected OpenRouter model/provider once and not stored in D1";
+    const name=document.createElement("span");name.className="attachment-chip-name";name.textContent=file.name;
+    const size=document.createElement("span");size.className="attachment-chip-size";size.textContent=formatBytes(file.size);
+    const remove=document.createElement("button");remove.className="attachment-remove";remove.textContent="×";remove.title="Remove attachment";remove.onclick=()=>{pendingAttachments.splice(index,1);renderAttachmentTray();};
+    chip.append(name,size,remove);tray.appendChild(chip);
+  });
+}
+
+/* =========================================================
    SEND AI
 ========================================================= */
 async function sendMessage(){
   if(generating)return;
-  const p=document.getElementById("prompt"),prompt=p.value.trim();if(!prompt)return;
+  const p=document.getElementById("prompt");
+  const attachmentsForRequest=pendingAttachments.slice();
+  const typedPrompt=p.value.trim();
+  const prompt=typedPrompt||(attachmentsForRequest.length?"Review the attached file(s). Identify important problems, risks, and useful improvements.":"");
+  if(!prompt)return;
   const continuingNormalChat=Boolean(currentChat?.id&&!currentChat?.project_id);
   if(chatContext==="project"&&!currentProject&&!continuingNormalChat){
     const go=await askConfirm("Start normal chat?","This new chat will continue without project files.");
@@ -1035,17 +1122,18 @@ async function sendMessage(){
   generating=true;document.getElementById("sendButton").disabled=true;setStatus("Generating…");
   try{
     await forceSaveActive();
-    addMessage("user",prompt);messages.push({role:"user",content:prompt});p.value="";resizePrompt();
+    addMessage("user",prompt,0,true,[],attachmentsForRequest.map(x=>x.name));messages.push({role:"user",content:prompt});p.value="";resizePrompt();
     const think=addThinking();
     const d=await api("/chat",{
       method:"POST",headers:{"Content-Type":"application/json"},signal:AbortSignal.timeout(130000),
-      body:JSON.stringify({chatId:currentChat?.id||"",projectId:chatContext==="project"?(currentProject?.id||""):"",prompt,language:document.getElementById("language").value,model:document.getElementById("modelSelect")?.value||"openrouter/free"})
+      body:JSON.stringify({chatId:currentChat?.id||"",projectId:chatContext==="project"?(currentProject?.id||""):"",prompt,language:document.getElementById("language").value,model:document.getElementById("modelSelect")?.value||"openrouter/free",attachments:attachmentsForRequest.map(x=>({name:x.name,content:x.content,size:x.size}))})
     });
     removeThinking(think);
     currentChat=d.chat||{id:d.chatId,title:"New Chat",total_tokens:0};
     const usage=d.usage||{};
     messages.push({role:"assistant",content:d.answer,total_tokens:Number(usage.totalTokens||0)});
     addMessage("assistant",d.answer,Number(usage.totalTokens||0),true,d.filesUpdated||[]);
+    pendingAttachments=[];renderAttachmentTray();
     await Promise.all([loadChats(),loadUsage()]);
     if(currentProject&&Array.isArray(d.filesUpdated)&&d.filesUpdated.length){
       const oldId=activeFile?.id||null;
@@ -1142,6 +1230,52 @@ function applyAccessibilitySettings(save=true){
   document.documentElement.style.setProperty("--chat-font-family",fonts[family]||fonts.system);
   if(save)try{localStorage.setItem("codepilot-chat-font-size",size);localStorage.setItem("codepilot-chat-font-family",family)}catch{}
 }
+
+/* =========================================================
+   D1 STORAGE MANAGER
+   The Worker reports a conservative app-data estimate. This
+   is not Cloudflare's authoritative physical database metric.
+========================================================= */
+async function loadStorageSummary(showStatus=false,detailed=false){
+  if(showStatus)setStatus("Checking D1 storage…");
+  const d=await api("/storage"+(detailed?"?detail=1":""));storageSnapshot=d;renderStorageSnapshot(d);
+  if(showStatus)flashStatus("D1 storage refreshed");
+  return d;
+}
+
+function storageRiskClass(percent){return percent>=85?"high":percent>=70?"warn":"";}
+function renderStorageSnapshot(d){
+  const limit=Number(d.limitBytes||500*1024*1024),used=Number(d.estimatedBytes||0),remaining=Math.max(0,limit-used),percent=limit?used/limit*100:0;
+  const sidebar=document.getElementById("d1StorageUsage");if(sidebar){sidebar.textContent="~"+formatBytes(used);sidebar.title="Estimated CodePilot app data; click to manage";}
+  const alertBox=document.getElementById("storageAlert");
+  if(alertBox){
+    if(percent>=70){alertBox.classList.remove("hidden");alertBox.classList.toggle("high",percent>=85);alertBox.textContent=(percent>=95?"Critical: ":percent>=85?"High storage: ":"Storage warning: ")+percent.toFixed(1)+"% of the 500 MB per-database Free limit by CodePilot's estimate. Review Storage Manager.";}
+    else{alertBox.classList.add("hidden");alertBox.classList.remove("high");}
+  }
+  const set=(id,text)=>{const el=document.getElementById(id);if(el)el.textContent=text};
+  set("storageUsed",formatBytes(used)+" / "+formatBytes(limit));set("storageRemaining",formatBytes(remaining));
+  set("storageChatCount",Number(d.counts?.chats||0)+" / "+Number(d.counts?.messages||0));set("storageProjectCount",Number(d.counts?.projects||0)+" / "+Number(d.counts?.files||0));
+  const meter=document.getElementById("storageMeterFill");if(meter){meter.style.width=Math.min(100,percent)+"%";meter.className="storage-meter-fill "+storageRiskClass(percent);}
+  const explain=document.getElementById("storageExplain");if(explain)explain.textContent="Estimated usage: "+percent.toFixed(2)+"%. This is CodePilot content plus a small row-overhead allowance, not Cloudflare's exact databaseSizeBytes metric. This refresh scanned about "+Number(d.inspectionRowsRead||0).toLocaleString()+" D1 rows. Free-plan daily row limits are account-level and are best checked in Cloudflare Billing.";
+  if(Array.isArray(d.projects))renderStorageProjects(d.projects);if(Array.isArray(d.chats))renderStorageChats(d.chats);if(Array.isArray(d.largestFiles))renderStorageFiles(d.largestFiles);
+}
+
+function storageItem(container,title,meta,size,onDelete){
+  const row=document.createElement("div");row.className="storage-item";
+  const main=document.createElement("div");main.className="storage-item-main";const t=document.createElement("div");t.className="storage-item-title";t.textContent=title;const m=document.createElement("div");m.className="storage-item-meta";m.textContent=meta;main.append(t,m);
+  const bytes=document.createElement("div");bytes.className="storage-item-size";bytes.textContent=formatBytes(size);
+  const del=document.createElement("button");del.className="storage-delete";del.textContent="Delete";del.onclick=onDelete;row.append(main,bytes,del);container.appendChild(row);
+}
+function renderStorageProjects(items){const c=document.getElementById("storageProjectList");if(!c)return;c.innerHTML="";if(!items.length){c.innerHTML='<div class="storage-empty">No projects.</div>';return;}items.forEach(x=>storageItem(c,x.name||"Untitled",Number(x.fileCount||0)+" files · "+Number(x.chatCount||0)+" project chats",Number(x.bytes||0),()=>deleteStorageProject(x)));}
+function renderStorageChats(items){const c=document.getElementById("storageChatList");if(!c)return;c.innerHTML="";if(!items.length){c.innerHTML='<div class="storage-empty">No chats.</div>';return;}items.forEach(x=>storageItem(c,x.title||"New Chat",Number(x.messageCount||0)+" messages · "+(x.projectName?"Project: "+x.projectName:"Standalone"),Number(x.bytes||0),()=>deleteStorageChat(x)));}
+function renderStorageFiles(items){const c=document.getElementById("storageFileList");if(!c)return;c.innerHTML="";if(!items.length){c.innerHTML='<div class="storage-empty">No files.</div>';return;}items.forEach(x=>storageItem(c,x.name||"file",x.projectName||"Unknown project",Number(x.bytes||0),()=>deleteStorageFile(x)));}
+
+async function openStorageManager(){document.getElementById("storageModal").classList.remove("hidden");try{await loadStorageSummary(false,true)}catch(e){document.getElementById("storageExplain").textContent="Could not load storage information: "+e.message;}}
+function closeStorageManager(){document.getElementById("storageModal").classList.add("hidden")}
+function storageOuter(e){if(e.target.id==="storageModal")closeStorageManager()}
+async function deleteStorageProject(item){const ok=await askConfirm("Delete project?",'Delete "'+(item.name||"this project")+'" and its files? Linked chats are kept as standalone chats.',{confirmLabel:"Delete",danger:true});if(!ok)return;await api("/projects/"+encodeURIComponent(item.id),{method:"DELETE"});if(currentProject?.id===item.id){clearProject();newChat();}await Promise.all([loadProjects(),loadChats()]);await loadStorageSummary(false,true);}
+async function deleteStorageChat(item){const ok=await askConfirm("Delete chat?",'Delete "'+(item.title||"this chat")+'" and all of its messages?',{confirmLabel:"Delete",danger:true});if(!ok)return;await api("/chats/"+encodeURIComponent(item.id),{method:"DELETE"});if(currentChat?.id===item.id)newChat();await loadChats();await loadUsage();await loadStorageSummary(false,true);}
+async function deleteStorageFile(item){const ok=await askConfirm("Delete file?",'Delete "'+(item.name||"this file")+'" from '+(item.projectName||"its project")+'?',{confirmLabel:"Delete",danger:true});if(!ok)return;await api("/projects/"+encodeURIComponent(item.projectId)+"/files/"+encodeURIComponent(item.id),{method:"DELETE"});if(currentProject?.id===item.projectId){await reloadProjectFilesPreserve(activeFile?.id||null);}await loadProjects();await loadStorageSummary(false,true);}
 
 /* =========================================================
    USAGE

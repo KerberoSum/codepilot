@@ -1,0 +1,39 @@
+CodePilot v2.3
+================
+
+Base
+----
+Built from the v2.2 security + project/standalone chat-navigation package used in this conversation.
+
+New in v2.3
+-----------
+1. Temporary source-file attachments for AI review.
+   - Up to 5 text/source files per request
+   - 500 KB per file, 1 MB combined
+   - Supported: html/htm/css/js/mjs/cjs/ts/jsx/tsx/json/md/txt/py/sql/xml/yaml/yml/csv
+   - Browser reads the file and sends text to the Worker/OpenRouter selected model/provider.
+   - Attachment contents are NOT stored in D1.
+
+2. D1 Storage Manager.
+   - Authenticated GET /storage endpoint
+   - Conservative CodePilot app-data estimate against the 500 MB Free per-database cap
+   - Approximate remaining space, object counts, largest projects/chats/files
+   - Delete projects, chats, or files with confirmation
+   - Sidebar warnings at 70%, 85%, and 95% estimated usage
+   - Storage inspection is not polled continuously; it runs after sign-in and on manual refresh/manage actions
+   - Cloudflare dashboard/Analytics databaseSizeBytes remains the authoritative physical-size metric
+
+Security
+--------
+Existing v2.2 authentication, signed sessions, restricted CORS and Cloudflare-only secrets are preserved.
+No new Cloudflare secrets are required.
+
+Database
+--------
+No D1 migration is required for v2.3.
+
+Deployment order
+----------------
+1. Replace worker/src/index.js and allow the Worker deployment to finish.
+2. Replace frontend/index.html and allow GitHub Pages to deploy.
+3. .github/workflows/pages.yml can stay unchanged if your current Pages workflow works.

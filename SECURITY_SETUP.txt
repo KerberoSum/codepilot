@@ -1,0 +1,17 @@
+CodePilot v2.2 security setup
+
+Before deploying the new frontend, configure these Cloudflare Worker secrets/variables:
+
+Secrets:
+- CODEPILOT_PASSWORD = choose a strong private password
+- CODEPILOT_SESSION_SECRET = a long random secret, preferably 32+ random characters
+
+Variable:
+- CODEPILOT_ALLOWED_ORIGINS = https://kerberosum.github.io
+
+During transition you may temporarily use:
+https://kerberosum.github.io,https://kersumcodingbot.netlify.app
+
+OPENROUTER_API_KEY must remain a Cloudflare secret. Do not put it in GitHub.
+
+Deploy worker/src/index.js first, then frontend/index.html.
