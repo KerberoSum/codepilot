@@ -13,7 +13,7 @@ from fastapi import FastAPI, Header, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
-app = FastAPI(title="CodePilot Remote Worker", version="3.0")
+app = FastAPI(title="CodePilot Remote Worker", version="3.1")
 
 SECRET = os.environ.get("CODEPILOT_AGENT_SECRET", "")
 GOOSE_BIN = os.environ.get("GOOSE_BIN", "/usr/local/bin/goose")
@@ -368,7 +368,7 @@ async def health():
     browser = browser_capability()
     return {
         "ok": True,
-        "version": 3,
+        "version": 3.1,
         "workspace": str(WORKSPACE),
         "busy": task_lock.locked(),
         "queued_missions": sum(1 for item in missions.values() if item.get("status") == "queued"),
