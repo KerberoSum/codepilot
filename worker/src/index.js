@@ -149,6 +149,89 @@ export default {
         return Boolean(match && await verifySessionToken(match[1]));
       }
 
+      async function bearerMatches(secretValue) {
+        const header = request.headers.get("Authorization") || "";
+        const match = header.match(/^Bearer\s+(.+)$/i);
+        if (!match || !secretValue) return false;
+        const supplied = await sha256(String(match[1]));
+        const expected = await sha256(String(secretValue).trim());
+        return constantTimeEqual(supplied, expected);
+      }
+
+      async function ensureVmRuntimeTable() {
+        await env.DB.prepare(`
+          CREATE TABLE IF NOT EXISTS vm_agent_runtime (
+            id INTEGER PRIMARY KEY CHECK (id = 1),
+            url TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+          )
+        `).run();
+      }
+
+      async function getVmAgentBase() {
+        try {
+          await ensureVmRuntimeTable();
+          const row = await env.DB.prepare(
+            "SELECT url FROM vm_agent_runtime WHERE id = 1"
+          ).first();
+          if (row?.url) return String(row.url).trim().replace(/\/+$/, "");
+        } catch {}
+        return String(env.VM_AGENT_URL || "").trim().replace(/\/+$/, "");
+      }
+
+      if (
+        path === "/vm-agent/register" &&
+        request.method === "POST"
+      ) {
+        if (!(await bearerMatches(env.VM_AGENT_REGISTRATION_SECRET))) {
+          return json({ success: false, error: "Unauthorized." }, 401);
+        }
+        const body = await safeJSON(request);
+        const candidate = String(body?.url || "").trim().replace(/\/+$/, "");
+        let parsed;
+        try { parsed = new URL(candidate); } catch {}
+        if (!parsed || parsed.protocol !== "https:" || !parsed.hostname.endsWith(".trycloudflare.com")) {
+          return json({ success: false, error: "A valid HTTPS trycloudflare.com URL is required." }, 400);
+        }
+        await ensureVmRuntimeTable();
+        await env.DB.prepare(`
+          INSERT INTO vm_agent_runtime (id, url, updated_at)
+          VALUES (1, ?, ?)
+          ON CONFLICT(id) DO UPDATE SET url = excluded.url, updated_at = excluded.updated_at
+        `).bind(candidate, new Date().toISOString()).run();
+        return json({ success: true, registered: true, host: parsed.hostname });
+      }
+
+      if (
+        path === "/vm-llm/v1/chat/completions" &&
+        request.method === "POST"
+      ) {
+        if (!(await bearerMatches(env.VM_MODEL_GATEWAY_SECRET))) {
+          return json({ error: { message: "Unauthorized.", type: "authentication_error" } }, 401);
+        }
+        if (!env.OPENROUTER_API_KEY) {
+          return json({ error: { message: "OPENROUTER_API_KEY is missing.", type: "server_error" } }, 500);
+        }
+        const body = await safeJSON(request);
+        if (!body || typeof body !== "object") {
+          return json({ error: { message: "Invalid JSON body.", type: "invalid_request_error" } }, 400);
+        }
+        if (!body.model) body.model = "openrouter/free";
+        const upstream = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+          method: "POST",
+          headers: {
+            "Authorization": "Bearer " + env.OPENROUTER_API_KEY,
+            "Content-Type": "application/json",
+            "X-OpenRouter-Title": "CodePilot VM Agent"
+          },
+          body: JSON.stringify(body)
+        });
+        const headers = new Headers();
+        headers.set("Content-Type", upstream.headers.get("content-type") || "application/json");
+        headers.set("Cache-Control", "no-store");
+        return new Response(upstream.body, { status: upstream.status, headers });
+      }
+
       if (path === "/auth/login" && request.method === "POST") {
         if (!env.CODEPILOT_PASSWORD || !env.CODEPILOT_SESSION_SECRET) {
           return json({ success: false, error: "CodePilot authentication secrets are not configured." }, 500);
@@ -204,18 +287,24 @@ export default {
         request.method === "GET"
       ) {
 
-        if (!env.VM_AGENT_URL || !env.VM_AGENT_SECRET) {
+        if (!env.VM_AGENT_SECRET) {
           return json({
             success: false,
             connected: false,
-            error: "VM Agent is not configured."
+            error: "VM Agent secret is not configured."
           }, 503);
         }
 
         const vmBase =
-          String(env.VM_AGENT_URL)
-            .trim()
-            .replace(/\/+$/, "");
+          await getVmAgentBase();
+
+        if (!vmBase) {
+          return json({
+            success: false,
+            connected: false,
+            error: "VM Agent URL is not configured or registered."
+          }, 503);
+        }
 
         const vmHealthUrl =
           vmBase + "/health";
@@ -297,14 +386,97 @@ export default {
 
 
       if (
+        path === "/vm-agent/task/stream" &&
+        request.method === "POST"
+      ) {
+        if (!env.VM_AGENT_SECRET) {
+          return json({ success: false, error: "VM Agent secret is not configured." }, 503);
+        }
+        const body = await safeJSON(request);
+        const prompt = String(body?.prompt || "").trim();
+        const mode = String(body?.mode || "read");
+        if (!prompt) return json({ success: false, error: "Task prompt is required." }, 400);
+        if (mode !== "read" && mode !== "workspace") {
+          return json({ success: false, error: "Unsupported VM Agent mode." }, 400);
+        }
+        const vmBase = await getVmAgentBase();
+        if (!vmBase) return json({ success: false, error: "VM Agent URL is not configured or registered." }, 503);
+
+        const commonHeaders = {
+          "Authorization": "Bearer " + String(env.VM_AGENT_SECRET).trim(),
+          "Content-Type": "application/json"
+        };
+        try {
+          let vmResponse = await fetch(vmBase + "/agent/task/stream", {
+            method: "POST",
+            headers: commonHeaders,
+            body: JSON.stringify({ prompt, mode }),
+            signal: AbortSignal.timeout(300000)
+          });
+
+          if (vmResponse.status === 404 || vmResponse.status === 405) {
+            vmResponse = await fetch(vmBase + "/agent/task", {
+              method: "POST",
+              headers: commonHeaders,
+              body: JSON.stringify({ prompt, mode }),
+              signal: AbortSignal.timeout(300000)
+            });
+          }
+
+          if (!vmResponse.ok) {
+            const text = await vmResponse.text();
+            let data = {};
+            try { data = text ? JSON.parse(text) : {}; } catch {}
+            return json({
+              success: false,
+              error: data.detail || data.error || ("VM Agent HTTP " + vmResponse.status)
+            }, 502);
+          }
+
+          const contentType = vmResponse.headers.get("content-type") || "";
+          if (contentType.includes("text/event-stream")) {
+            return new Response(vmResponse.body, {
+              status: 200,
+              headers: {
+                ...corsHeaders,
+                "Content-Type": "text/event-stream",
+                "Cache-Control": "no-store",
+                "Connection": "keep-alive"
+              }
+            });
+          }
+
+          const data = await vmResponse.json();
+          const encoder = new TextEncoder();
+          const payload =
+            "event: status\ndata: " + JSON.stringify({ stage: "completed" }) + "\n\n" +
+            "event: result\ndata: " + JSON.stringify(data) + "\n\n";
+          return new Response(encoder.encode(payload), {
+            status: 200,
+            headers: {
+              ...corsHeaders,
+              "Content-Type": "text/event-stream",
+              "Cache-Control": "no-store"
+            }
+          });
+        } catch (error) {
+          return json({
+            success: false,
+            error: "VM Agent stream request failed: " + (error?.message || String(error))
+          }, 502);
+        }
+      }
+
+
+      if (
         path === "/vm-agent/task" &&
         request.method === "POST"
       ) {
 
-        if (!env.VM_AGENT_URL || !env.VM_AGENT_SECRET) {
+        if (!env.VM_AGENT_SECRET) {
           return json({
             success: false,
-            error: "VM Agent is not configured."
+            error: "VM Agent secret is not configured."
           }, 503);
         }
 
@@ -335,9 +507,14 @@ export default {
         }
 
         const vmBase =
-          String(env.VM_AGENT_URL)
-            .trim()
-            .replace(/\/+$/, "");
+          await getVmAgentBase();
+
+        if (!vmBase) {
+          return json({
+            success: false,
+            error: "VM Agent URL is not configured or registered."
+          }, 503);
+        }
 
         try {
           const vmResponse =
