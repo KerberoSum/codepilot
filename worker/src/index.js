@@ -179,6 +179,51 @@ export default {
         return String(env.VM_AGENT_URL || "").trim().replace(/\/+$/, "");
       }
 
+      async function callVmAgentJson(agentPath, options = {}) {
+        if (!env.VM_AGENT_SECRET) {
+          const error = new Error("VM Agent secret is not configured.");
+          error.status = 503;
+          throw error;
+        }
+        const vmBase = await getVmAgentBase();
+        if (!vmBase) {
+          const error = new Error("VM Agent URL is not configured or registered.");
+          error.status = 503;
+          throw error;
+        }
+
+        const method = options.method || "GET";
+        const headers = {
+          "Authorization": "Bearer " + String(env.VM_AGENT_SECRET).trim()
+        };
+        const init = {
+          method,
+          headers,
+          signal: AbortSignal.timeout(options.timeout || 20000)
+        };
+        if (options.body !== undefined) {
+          headers["Content-Type"] = "application/json";
+          init.body = JSON.stringify(options.body);
+        }
+
+        const response = await fetch(vmBase + agentPath, init);
+        const text = await response.text();
+        let data = {};
+        try { data = text ? JSON.parse(text) : {}; }
+        catch {
+          const error = new Error("VM Agent returned invalid JSON.");
+          error.status = 502;
+          throw error;
+        }
+        if (!response.ok) {
+          const detail = typeof data.detail === "string" ? data.detail : data.detail?.message;
+          const error = new Error(detail || data.error || ("VM Agent HTTP " + response.status));
+          error.status = response.status;
+          throw error;
+        }
+        return data;
+      }
+
       if (
         path === "/vm-agent/register" &&
         request.method === "POST"
@@ -395,6 +440,7 @@ export default {
         const body = await safeJSON(request);
         const prompt = String(body?.prompt || "").trim();
         const mode = String(body?.mode || "read");
+        const web = body?.web === true;
         if (!prompt) return json({ success: false, error: "Task prompt is required." }, 400);
         if (mode !== "read" && mode !== "workspace") {
           return json({ success: false, error: "Unsupported VM Agent mode." }, 400);
@@ -410,7 +456,7 @@ export default {
           let vmResponse = await fetch(vmBase + "/agent/task/stream", {
             method: "POST",
             headers: commonHeaders,
-            body: JSON.stringify({ prompt, mode }),
+            body: JSON.stringify({ prompt, mode, web }),
             signal: AbortSignal.timeout(300000)
           });
 
@@ -418,7 +464,7 @@ export default {
             vmResponse = await fetch(vmBase + "/agent/task", {
               method: "POST",
               headers: commonHeaders,
-              body: JSON.stringify({ prompt, mode }),
+              body: JSON.stringify({ prompt, mode, web }),
               signal: AbortSignal.timeout(300000)
             });
           }
@@ -489,6 +535,9 @@ export default {
         const mode =
           String(body?.mode || "read");
 
+        const web =
+          body?.web === true;
+
         if (!prompt) {
           return json({
             success: false,
@@ -532,7 +581,8 @@ export default {
                 body:
                   JSON.stringify({
                     prompt,
-                    mode
+                    mode,
+                    web
                   }),
                 signal:
                   AbortSignal.timeout(300000)
@@ -585,6 +635,73 @@ export default {
           }, 502);
         }
 
+      }
+
+
+      /* =====================================================
+         REMOTE WORKER CAPABILITIES + MISSIONS
+      ===================================================== */
+
+      if (path === "/vm-agent/capabilities" && request.method === "GET") {
+        try {
+          const data = await callVmAgentJson("/agent/capabilities", { timeout: 12000 });
+          return json({ success: true, ...data });
+        } catch (error) {
+          return json({ success: false, error: error?.message || String(error) }, error?.status >= 400 && error?.status < 600 ? 502 : 502);
+        }
+      }
+
+      if (path === "/vm-agent/missions" && request.method === "GET") {
+        try {
+          const data = await callVmAgentJson("/agent/missions", { timeout: 12000 });
+          return json({ success: true, ...data });
+        } catch (error) {
+          return json({ success: false, error: error?.message || String(error) }, 502);
+        }
+      }
+
+      if (path === "/vm-agent/missions" && request.method === "POST") {
+        const body = await safeJSON(request);
+        const prompt = String(body?.prompt || "").trim();
+        const mode = String(body?.mode || "read");
+        const web = body?.web === true;
+        const title = String(body?.title || "").trim().slice(0, 120);
+        if (!prompt) return json({ success: false, error: "Mission prompt is required." }, 400);
+        if (mode !== "read" && mode !== "workspace") {
+          return json({ success: false, error: "Unsupported VM Agent mode." }, 400);
+        }
+        try {
+          const data = await callVmAgentJson("/agent/missions", {
+            method: "POST",
+            body: { prompt, mode, web, title: title || undefined },
+            timeout: 12000
+          });
+          return json({ success: true, ...data });
+        } catch (error) {
+          return json({ success: false, error: error?.message || String(error) }, 502);
+        }
+      }
+
+      const vmMissionMatch = path.match(/^\/vm-agent\/missions\/([A-Za-z0-9_-]+)$/);
+      if (vmMissionMatch && request.method === "GET") {
+        try {
+          const data = await callVmAgentJson("/agent/missions/" + encodeURIComponent(vmMissionMatch[1]), { timeout: 12000 });
+          return json({ success: true, ...data });
+        } catch (error) {
+          return json({ success: false, error: error?.message || String(error) }, 502);
+        }
+      }
+
+      if (vmMissionMatch && request.method === "DELETE") {
+        try {
+          const data = await callVmAgentJson("/agent/missions/" + encodeURIComponent(vmMissionMatch[1]), {
+            method: "DELETE",
+            timeout: 12000
+          });
+          return json({ success: true, ...data });
+        } catch (error) {
+          return json({ success: false, error: error?.message || String(error) }, 502);
+        }
       }
 
 
