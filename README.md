@@ -10,10 +10,14 @@ CodePilot has two separately deployed parts:
 1. In `frontend/index.html`, replace `PASTE_YOUR_WORKER_URL_HERE` with the HTTPS URL of the deployed Cloudflare Worker (without a trailing slash).
 2. In `wrangler.jsonc`, replace `REPLACE_WITH_YOUR_D1_DATABASE_ID` with the database ID shown by Cloudflare.
 3. Store `OPENROUTER_API_KEY` as a Cloudflare Worker secret. Never add it to this repository.
-4. To enable the VM Agent bridge, add these Cloudflare Worker secrets:
-   - `VM_AGENT_URL` — the HTTPS base URL of the VM agent tunnel, for example `https://example.trycloudflare.com`.
-   - `VM_AGENT_SECRET` — the bearer secret configured on the VM agent service.
-   The frontend never receives `VM_AGENT_SECRET`; authenticated requests are proxied through the Worker.
+4. To enable the VM Agent bridge, add these Cloudflare Worker settings:
+   - `VM_AGENT_URL` — optional fallback HTTPS base URL of the VM agent tunnel. VM Agent v2 can auto-register a new Quick Tunnel URL.
+   - `VM_AGENT_SECRET` — bearer secret configured on the VM agent service.
+   - `VM_AGENT_REGISTRATION_SECRET` — separate secret used by the VM to register its current Quick Tunnel URL.
+   - `VM_MODEL_GATEWAY_SECRET` — separate secret for the VM-to-CodePilot OpenAI-compatible model gateway.
+   The frontend never receives these VM secrets; authenticated browser requests are proxied through the Worker.
+
+VM Agent v2 files live in `vm-agent/`. They add task history/status, streaming-compatible task transport, an auto-registering Quick Tunnel helper, a hardened service template, and the CodePilot model gateway.
 
 ## Netlify settings
 
