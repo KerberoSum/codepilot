@@ -4,7 +4,7 @@ set -euo pipefail
 : "${CODEPILOT_WORKER_URL:?Set CODEPILOT_WORKER_URL}"
 : "${VM_AGENT_REGISTRATION_SECRET:?Set VM_AGENT_REGISTRATION_SECRET}"
 
-LOG="${QUICK_TUNNEL_LOG:-/var/log/codepilot-quick-tunnel.log}"
+LOG="${QUICK_TUNNEL_LOG:-${HOME:-/tmp}/codepilot-quick-tunnel.log}"
 LOCAL_URL="${LOCAL_AGENT_URL:-http://127.0.0.1:8765}"
 
 rm -f "$LOG"
