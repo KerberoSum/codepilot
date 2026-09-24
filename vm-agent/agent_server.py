@@ -422,7 +422,11 @@ async def cancel_current_task(authorization: Optional[str] = Header(default=None
     if not active_task or not active_task_process:
         return {"ok": True, "cancelled": False, "message": "No active Remote Worker task."}
     task_id = str(active_task.get("id") or "")
-    if task_id:
+    if active_task.get("kind") == "mission" and task_id in missions:
+        missions[task_id]["status"] = "cancelling"
+        missions[task_id]["updated_at"] = now_iso()
+        save_missions()
+    elif task_id:
         cancelled_task_ids.add(task_id)
     try:
         active_task_process.kill()
@@ -449,7 +453,7 @@ async def terminal(req: TerminalRequest, authorization: Optional[str] = Header(d
         + marker
         + "RC=%s\\n' \"$__cp_rc\"\nprintf '"
         + marker
-        + "CWD='\npwd\n"
+        + "CWD=%s\\n' \"$PWD\"\n"
     )
 
     env = os.environ.copy()
@@ -517,7 +521,7 @@ async def terminal(req: TerminalRequest, authorization: Optional[str] = Header(d
 @app.post("/agent/task")
 async def task(req: TaskRequest, authorization: Optional[str] = Header(default=None)):
     require_auth(authorization)
-    return await execute(req)
+    return await execute(req, wait_for_slot=True)
 
 
 @app.post("/agent/task/stream")
@@ -530,7 +534,7 @@ async def task_stream(req: TaskRequest, authorization: Optional[str] = Header(de
             yield "event: status\ndata: " + json.dumps({"stage": "waiting"}) + "\n\n"
         yield "event: status\ndata: " + json.dumps({"stage": "goose_running"}) + "\n\n"
         try:
-            result = await execute(req)
+            result = await execute(req, wait_for_slot=True)
             yield "event: status\ndata: " + json.dumps({"stage": "completed"}) + "\n\n"
             yield "event: result\ndata: " + json.dumps(result) + "\n\n"
         except HTTPException as exc:
