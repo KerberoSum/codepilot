@@ -114,6 +114,20 @@ button,input,textarea,select{font:inherit}button{cursor:pointer}.hidden{display:
 .modal input{width:100%;border:1px solid var(--border);background:var(--panel);color:#fff;border-radius:8px;padding:9px;outline:0}.modal input:focus{border-color:var(--accent)}
 .modal-actions{display:flex;justify-content:flex-end;gap:7px;margin-top:13px}.modal-btn{border:1px solid var(--border);border-radius:7px;background:var(--panel3);color:#fff;padding:7px 11px;font-size:10px}.modal-btn.primary{background:var(--accent);border-color:var(--accent)}.modal-btn.danger{color:#fff;background:#9f3144;border-color:#b94358}
 .storage-modal{width:min(820px,100%);max-height:min(86vh,820px);overflow:auto}.storage-summary-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px;margin:12px 0}.storage-card{border:1px solid var(--border);background:var(--panel);border-radius:9px;padding:10px}.storage-card span{display:block;color:var(--muted);font-size:9px;margin-bottom:4px}.storage-card b{font-size:13px;color:#fff}.storage-meter{height:8px;border-radius:999px;background:#080b10;border:1px solid var(--border);overflow:hidden;margin:8px 0}.storage-meter-fill{height:100%;width:0;background:var(--green);transition:.2s}.storage-meter-fill.warn{background:var(--yellow)}.storage-meter-fill.high{background:var(--red)}.storage-explain{color:var(--muted);font-size:9px;line-height:1.5;margin:7px 0 12px}.storage-section{margin-top:14px}.storage-section h4{margin:0 0 6px;font-size:11px;color:#fff}.storage-list{border:1px solid var(--border);border-radius:8px;overflow:hidden}.storage-item{display:grid;grid-template-columns:minmax(0,1fr) auto auto;gap:8px;align-items:center;padding:8px 9px;border-bottom:1px solid var(--border2);font-size:9px}.storage-item:last-child{border-bottom:0}.storage-item-main{min-width:0}.storage-item-title{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:#e8edf5}.storage-item-meta{color:var(--muted);margin-top:2px}.storage-delete{border:1px solid #5d2d38;background:#2a1419;color:#ff9bac;border-radius:6px;padding:4px 7px;font-size:8px}.storage-delete:hover{background:#4a1f29}.storage-empty{padding:9px;color:var(--muted);font-size:9px}@media(max-width:680px){.storage-summary-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.storage-item{grid-template-columns:minmax(0,1fr) auto}.storage-item-size{display:none}}
+.vm-agent-modal{width:min(720px,100%);max-height:min(86vh,780px);overflow:auto}
+.vm-agent-status{display:flex;align-items:center;gap:8px;margin:10px 0 12px;font-size:10px;color:var(--muted)}
+.vm-agent-dot{width:8px;height:8px;border-radius:50%;background:var(--muted2);box-shadow:0 0 0 2px rgba(255,255,255,.04)}
+.vm-agent-dot.online{background:var(--green);box-shadow:0 0 10px rgba(80,220,140,.45)}
+.vm-agent-dot.offline{background:var(--red);box-shadow:0 0 10px rgba(255,90,110,.35)}
+.vm-agent-controls{display:flex;gap:8px;align-items:center;margin-bottom:8px;flex-wrap:wrap}
+.vm-agent-controls select{border:1px solid var(--border);background:var(--panel);color:#fff;border-radius:7px;padding:7px 9px;font-size:10px}
+.vm-agent-task{width:100%;min-height:110px;resize:vertical;border:1px solid var(--border);background:var(--panel);color:#fff;border-radius:9px;padding:10px;font:inherit;line-height:1.5;outline:0}
+.vm-agent-task:focus{border-color:var(--accent)}
+.vm-agent-output{margin-top:12px;border:1px solid var(--border);background:#090c12;border-radius:9px;padding:11px;min-height:120px;white-space:pre-wrap;overflow-wrap:anywhere;color:#e8edf5;font-size:10px;line-height:1.55}
+.vm-agent-meta{margin-top:7px;color:var(--muted);font-size:9px}
+.vm-agent-run{border:1px solid var(--accent);background:var(--accent);color:#fff;border-radius:7px;padding:7px 11px;font-size:10px;font-weight:700}
+.vm-agent-run:disabled{opacity:.55;cursor:wait}
+
 
 /* PREVIEW */
 .preview-toolbar{height:34px;display:flex;align-items:center;justify-content:space-between;padding:0 10px;border-bottom:1px solid var(--border);background:var(--panel);color:var(--muted);font-size:10px}
@@ -241,7 +255,7 @@ button,input,textarea,select{font:inherit}button{cursor:pointer}.hidden{display:
     <div class="ai-title">
       <button class="icon-btn mobile-nav" onclick="toggleLeft()" title="Workspace">☰</button>
       <strong>AI Assistant</strong>
-      <div class="ai-meta"><span id="aiProjectLabel">No project attached</span><button id="workerStatus" class="worker-status checking" onclick="checkWorkerHealth(true)" title="Run Worker diagnostics">Checking</button></div>
+      <div class="ai-meta"><span id="aiProjectLabel">No project attached</span><button id="workerStatus" class="worker-status checking" onclick="checkWorkerHealth(true)" title="Run Worker diagnostics">Checking</button><button id="vmAgentButton" class="worker-status checking" onclick="openVmAgent()" title="Open VM Agent">VM Agent</button></div>
     </div>
     <div class="chat-controls">
       <select id="chatSelect" class="chat-select" onchange="chatSelectChanged()"><option value="">New Chat</option></select>
@@ -320,6 +334,34 @@ button,input,textarea,select{font:inherit}button{cursor:pointer}.hidden{display:
     <div class="modal-actions">
       <button class="modal-btn" onclick="loadStorageSummary(true,true)">Refresh</button>
       <button class="modal-btn primary" onclick="closeStorageManager()">Close</button>
+    </div>
+  </div>
+</div>
+
+
+<!-- VM Agent -->
+<div id="vmAgentModal" class="modal-bg hidden" onclick="vmAgentOuter(event)">
+  <div class="modal vm-agent-modal">
+    <h3>VM Agent</h3>
+    <p>Run tasks on the Oracle VM through CodePilot. The VM credential stays in the Cloudflare Worker.</p>
+    <div class="vm-agent-status">
+      <span id="vmAgentDot" class="vm-agent-dot"></span>
+      <span id="vmAgentStatusText">Not checked</span>
+      <button class="modal-btn" onclick="checkVmAgent(true)">Check connection</button>
+    </div>
+    <div class="vm-agent-controls">
+      <label for="vmAgentMode">Mode</label>
+      <select id="vmAgentMode">
+        <option value="read">Read only</option>
+        <option value="workspace">Workspace</option>
+      </select>
+      <button id="vmAgentRunButton" class="vm-agent-run" onclick="runVmAgentTask()">Run task</button>
+    </div>
+    <textarea id="vmAgentTask" class="vm-agent-task" placeholder="Example: Check disk usage and report anything unusual."></textarea>
+    <div id="vmAgentOutput" class="vm-agent-output">No task run yet.</div>
+    <div id="vmAgentMeta" class="vm-agent-meta"></div>
+    <div class="modal-actions">
+      <button class="modal-btn" onclick="closeVmAgent()">Close</button>
     </div>
   </div>
 </div>
@@ -436,6 +478,7 @@ async function init(){
     setStatus("Ready");
     // One lightweight-on-use storage inspection per sign-in; never poll it repeatedly.
     setTimeout(()=>loadStorageSummary(false).catch(()=>{}),400);
+    setTimeout(()=>checkVmAgent(false).catch(()=>{}),700);
   }catch(e){setWorkerIndicator("offline","Offline",e.message);setStatus("Connection error","error"); alert("CodePilot could not start:\\n\\n"+e.message);}
 }
 
@@ -493,6 +536,83 @@ async function checkWorkerHealth(deep=false){
     setWorkerIndicator("offline","Offline",e.message);
     if(deep)alert("Worker diagnostics failed:\n\n"+e.message);
     return null;
+  }
+}
+
+function setVmAgentStatus(state,text){
+  const dot=document.getElementById("vmAgentDot");
+  const label=document.getElementById("vmAgentStatusText");
+  const button=document.getElementById("vmAgentButton");
+  if(dot)dot.className="vm-agent-dot "+(state||"");
+  if(label)label.textContent=text||"Unknown";
+  if(button){
+    button.className="worker-status "+(state==="online"?"online":state==="offline"?"offline":"checking");
+    button.textContent=state==="online"?"VM Online":state==="offline"?"VM Offline":"VM Agent";
+  }
+}
+
+async function checkVmAgent(showError=false){
+  setVmAgentStatus("","Checking…");
+  try{
+    const d=await api("/vm-agent/health",{signal:AbortSignal.timeout(12000)});
+    if(!d.connected)throw new Error(d.error||"VM Agent is unavailable.");
+    setVmAgentStatus("online","Connected");
+    return true;
+  }catch(e){
+    setVmAgentStatus("offline",e.message||"Offline");
+    if(showError)alert("VM Agent connection failed:\n\n"+(e.message||e));
+    return false;
+  }
+}
+
+async function openVmAgent(){
+  document.getElementById("vmAgentModal").classList.remove("hidden");
+  setTimeout(()=>document.getElementById("vmAgentTask")?.focus(),30);
+  checkVmAgent(false);
+}
+
+function closeVmAgent(){
+  document.getElementById("vmAgentModal").classList.add("hidden");
+}
+
+function vmAgentOuter(e){
+  if(e.target.id==="vmAgentModal")closeVmAgent();
+}
+
+async function runVmAgentTask(){
+  const input=document.getElementById("vmAgentTask");
+  const mode=document.getElementById("vmAgentMode").value;
+  const button=document.getElementById("vmAgentRunButton");
+  const output=document.getElementById("vmAgentOutput");
+  const meta=document.getElementById("vmAgentMeta");
+  const prompt=input.value.trim();
+  if(!prompt)return;
+
+  button.disabled=true;
+  output.textContent="Running on VM…";
+  meta.textContent="";
+  const started=performance.now();
+
+  try{
+    const d=await api("/vm-agent/task",{
+      method:"POST",
+      headers:{"Content-Type":"application/json"},
+      signal:AbortSignal.timeout(305000),
+      body:JSON.stringify({prompt,mode})
+    });
+    output.textContent=d.result||"(No text response)";
+    const t=d.tokens||{};
+    const elapsed=((performance.now()-started)/1000).toFixed(1);
+    meta.textContent=
+      "Status: "+(d.status||"completed")+
+      " · "+elapsed+" s"+
+      (t.total!=null?" · "+formatTokens(t.total)+" tokens":"");
+    setVmAgentStatus("online","Connected");
+  }catch(e){
+    output.textContent="VM Agent error: "+(e.message||e);
+    setVmAgentStatus("offline",e.message||"Offline");
+  }finally{
+    button.disabled=false;
   }
 }
 
