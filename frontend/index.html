@@ -288,6 +288,10 @@ button,input,textarea,select{font:inherit}button{cursor:pointer}.hidden{display:
       <div class="ai-meta"><span id="aiProjectLabel">No project attached</span><button id="workerStatus" class="worker-status checking" onclick="checkWorkerHealth(true)" title="Run Worker diagnostics">Checking</button><button id="vmAgentButton" class="worker-status checking" onclick="openVmAgent()" title="Switch to the VM Agent workspace">VM Agent →</button></div>
     </div>
     <div class="chat-controls">
+      <div class="agent-page-actions" aria-label="CodePilot page switch">
+        <button class="agent-page-tab active" onclick="switchAppPage('workspace')">Workspace</button>
+        <button class="agent-page-tab" onclick="switchAppPage('agent')">VM Agent</button>
+      </div>
       <select id="chatSelect" class="chat-select" onchange="chatSelectChanged()"><option value="">New Chat</option></select>
       <button class="icon-btn" onclick="newChat()" title="New chat">＋</button>
       <button class="icon-btn" onclick="renameChat()" title="Rename chat">✎</button>
