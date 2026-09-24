@@ -29,7 +29,11 @@ ln -sf "$TRAILBLAZE_DIR/bin/trailblaze" /usr/local/bin/trailblaze
 
 echo "Installing the bundled Trailblaze agent skill in the worker workspace..."
 sudo -u codepilot-agent env HOME="$AGENT_HOME" PATH="$TRAILBLAZE_DIR/bin:/usr/local/bin:/usr/bin:/bin" \
-  bash -c 'cd /srv/codepilot-workspace && trailblaze skill install --agent goose || true'
+  bash -c 'cd /srv/codepilot-workspace && trailblaze skill install --agent goose'
+
+echo "Verifying the Trailblaze skill..."
+sudo -u codepilot-agent env HOME="$AGENT_HOME" PATH="$TRAILBLAZE_DIR/bin:/usr/local/bin:/usr/bin:/bin" \
+  bash -c 'cd /srv/codepilot-workspace && trailblaze skill status'
 
 echo "Checking Trailblaze and its web device..."
 sudo -u codepilot-agent env HOME="$AGENT_HOME" PATH="$TRAILBLAZE_DIR/bin:/usr/local/bin:/usr/bin:/bin" \
