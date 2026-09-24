@@ -147,6 +147,10 @@ button,input,textarea,select{font:inherit}button{cursor:pointer}.hidden{display:
 .agent-transcript{flex:1;min-height:0;overflow:auto;padding:18px clamp(12px,3vw,34px)}
 .agent-welcome{max-width:760px;margin:0 auto 14px;border:1px solid var(--border);border-radius:12px;background:var(--panel);padding:13px 14px;color:var(--muted);font-size:10px;line-height:1.6}.agent-welcome strong{display:block;color:#fff;font-size:12px;margin-bottom:3px}
 .agent-rich-output{max-width:900px;margin:0 auto;min-height:180px;white-space:normal;font-size:11px;padding:16px}.agent-rich-output>.msg-text{font-size:inherit}
+.agent-chat{max-width:900px;margin:0 auto;display:flex;flex-direction:column;gap:14px}
+.agent-chat-msg{display:flex;gap:9px;align-items:flex-start}.agent-chat-msg.user{justify-content:flex-end}.agent-chat-msg.user .agent-chat-bubble{background:#182235;border-color:#2a3951}.agent-chat-msg.assistant .agent-chat-bubble{background:var(--panel);border-color:var(--border)}
+.agent-chat-bubble{max-width:min(780px,88%);border:1px solid var(--border);border-radius:12px;padding:11px 12px;overflow-wrap:anywhere}.agent-chat-role{font-size:8px;font-weight:800;color:var(--muted);margin-bottom:5px;text-transform:uppercase;letter-spacing:.6px}.agent-chat-msg.user .agent-chat-role{text-align:right}
+.agent-chat-bubble>.msg-text{font-size:11px}.agent-chat-error{border-color:rgba(255,102,125,.45)!important;background:rgba(255,102,125,.07)!important}.agent-chat-pending{color:var(--muted)}
 .agent-run-meta{max-width:900px;margin:7px auto 0}
 .agent-composer{flex:0 0 auto;border-top:1px solid var(--border);background:var(--panel);padding:12px clamp(12px,3vw,34px)}
 .agent-composer-inner{max-width:900px;margin:0 auto;border:1px solid var(--border);border-radius:12px;background:var(--panel2);overflow:hidden}
@@ -431,19 +435,19 @@ button,input,textarea,select{font:inherit}button{cursor:pointer}.hidden{display:
       </div>
 
       <div class="agent-transcript">
-        <div class="agent-welcome"><strong>Your VM can now act as CodePilot's execution side.</strong>Use Read only for diagnostics and inspection. Use Workspace when you want the agent to create or modify files inside <code>/srv/codepilot-workspace</code>.</div>
-        <div id="vmAgentOutput" class="vm-agent-output agent-rich-output">Choose a quick task or describe what you want the VM to do.</div>
+        <div class="agent-welcome"><strong>Talk to your VM Agent normally.</strong>It keeps recent conversation context in this browser so follow-ups like “check that again” or “fix it” make sense. Read only is for inspection; Workspace allows changes inside <code>/srv/codepilot-workspace</code>.</div>
+        <div id="vmAgentConversation" class="agent-chat"></div>
         <div id="vmAgentMeta" class="vm-agent-meta agent-run-meta"></div>
       </div>
 
       <div class="agent-composer">
         <div class="agent-composer-inner">
-          <textarea id="vmAgentTask" placeholder="Ask the VM Agent to inspect, diagnose, create, or work on something…" onkeydown="vmAgentKeydown(event)"></textarea>
+          <textarea id="vmAgentTask" placeholder="Message your VM Agent…" onkeydown="vmAgentKeydown(event)"></textarea>
           <div class="agent-composer-actions">
-            <button class="agent-secondary" onclick="copyVmAgentOutput()">Copy result</button>
-            <button class="agent-secondary" onclick="clearVmAgentCurrent()">New task</button>
-            <span style="flex:1;color:var(--muted);font-size:8px">Ctrl/Cmd + Enter to run</span>
-            <button id="vmAgentRunButton" class="vm-agent-run" onclick="runVmAgentTask()">Run task</button>
+            <button class="agent-secondary" onclick="copyVmAgentOutput()">Copy last reply</button>
+            <button class="agent-secondary" onclick="clearVmAgentCurrent()">New chat</button>
+            <span style="flex:1;color:var(--muted);font-size:8px">Enter to send · Shift+Enter for a new line</span>
+            <button id="vmAgentRunButton" class="vm-agent-run" onclick="runVmAgentTask()">Send</button>
           </div>
         </div>
       </div>
@@ -564,6 +568,7 @@ async function init(){
     // One lightweight-on-use storage inspection per sign-in; never poll it repeatedly.
     setTimeout(()=>loadStorageSummary(false).catch(()=>{}),400);
     setTimeout(()=>checkVmAgent(false).catch(()=>{}),700);
+    renderVmAgentConversation();
   }catch(e){setWorkerIndicator("offline","Offline",e.message);setStatus("Connection error","error"); alert("CodePilot could not start:\\n\\n"+e.message);}
 }
 
@@ -682,6 +687,7 @@ function switchAppPage(page){
   if(page==="agent"){
     agent?.classList.remove("hidden");
     renderVmAgentHistory();
+    renderVmAgentConversation();
     checkVmAgent(false);
     setTimeout(()=>document.getElementById("vmAgentTask")?.focus(),30);
   }else{
@@ -700,24 +706,70 @@ function setVmAgentPreset(prompt,mode="read"){
   input?.focus();
 }
 
+const VM_AGENT_CHAT_KEY="codepilot-vm-agent-chat-v1";
+
+function loadVmAgentConversation(){
+  try{
+    const data=JSON.parse(localStorage.getItem(VM_AGENT_CHAT_KEY)||"[]");
+    return Array.isArray(data)?data.slice(-30):[];
+  }catch{return []}
+}
+
+function saveVmAgentConversation(items){
+  try{localStorage.setItem(VM_AGENT_CHAT_KEY,JSON.stringify(items.slice(-30)))}catch{}
+}
+
+function renderVmAgentConversation(){
+  const box=document.getElementById("vmAgentConversation");
+  if(!box)return;
+  const items=loadVmAgentConversation();
+  box.innerHTML="";
+  if(!items.length){
+    const empty=document.createElement("div");empty.className="agent-rich-output";
+    empty.textContent="Start a conversation with your VM Agent.";
+    box.appendChild(empty);return;
+  }
+  items.forEach(item=>appendVmAgentMessage(item.role,item.text,{error:item.error,scroll:false}));
+  box.parentElement.scrollTop=box.parentElement.scrollHeight;
+}
+
+function appendVmAgentMessage(role,text,{error=false,pending=false,scroll=true,id=""}={}){
+  const box=document.getElementById("vmAgentConversation");if(!box)return null;
+  const wrap=document.createElement("div");wrap.className="agent-chat-msg "+role;if(id)wrap.id=id;
+  const bubble=document.createElement("div");bubble.className="agent-chat-bubble"+(error?" agent-chat-error":"")+(pending?" agent-chat-pending":"");
+  const label=document.createElement("div");label.className="agent-chat-role";label.textContent=role==="user"?"You":"VM Agent";
+  bubble.appendChild(label);
+  if(role==="assistant"&&!pending&&!error)renderAIText(bubble,String(text||""));
+  else{const body=document.createElement("div");body.className="msg-text";body.textContent=String(text||"");bubble.appendChild(body);}
+  wrap.appendChild(bubble);box.appendChild(wrap);
+  if(scroll)box.parentElement.scrollTop=box.parentElement.scrollHeight;
+  return wrap;
+}
+
 function clearVmAgentCurrent(){
-  const input=document.getElementById("vmAgentTask"),output=document.getElementById("vmAgentOutput"),meta=document.getElementById("vmAgentMeta");
+  try{localStorage.removeItem(VM_AGENT_CHAT_KEY)}catch{}
+  const input=document.getElementById("vmAgentTask"),meta=document.getElementById("vmAgentMeta");
   if(input)input.value="";
-  if(output)output.textContent="Choose a quick task or describe what you want the VM to do.";
   if(meta)meta.textContent="";
+  renderVmAgentConversation();
   input?.focus();
 }
 
 function vmAgentKeydown(e){
-  if(e.key==="Enter"&&(e.ctrlKey||e.metaKey)){e.preventDefault();runVmAgentTask();}
+  if(e.key==="Enter"&&!e.shiftKey&&!e.isComposing){e.preventDefault();runVmAgentTask();}
 }
 
-function renderVmAgentResult(text){
-  const output=document.getElementById("vmAgentOutput");
-  if(!output)return;
-  output.innerHTML="";
-  renderAIText(output,String(text||"(No text response)"));
+function buildVmAgentPrompt(prompt){
+  const prior=loadVmAgentConversation().slice(-10);
+  const lines=prior.map(m=>(m.role==="user"?"User":"Assistant")+": "+String(m.text||"").slice(0,900));
+  let context=lines.join("\n\n");
+  if(context.length>5200)context=context.slice(-5200);
+  return context
+    ? "Continue this conversation naturally. Use the recent conversation only as context; perform the newest request.\n\nRECENT CONVERSATION:\n"+context+"\n\nNEW USER MESSAGE:\n"+prompt
+    : prompt;
 }
+
+function renderVmAgentResult(text){appendVmAgentMessage("assistant",text);}
 
 const VM_AGENT_HISTORY_KEY="codepilot-vm-agent-history-v1";
 
@@ -770,8 +822,10 @@ function clearVmAgentHistory(){
 }
 
 async function copyVmAgentOutput(){
-  const text=document.getElementById("vmAgentOutput")?.textContent||"";
-  try{await navigator.clipboard.writeText(text)}catch{}
+  const items=loadVmAgentConversation();
+  const last=[...items].reverse().find(x=>x.role==="assistant"&&!x.error);
+  if(!last)return;
+  try{await navigator.clipboard.writeText(last.text||"")}catch{}
 }
 
 function parseSseChunk(buffer,onEvent){
@@ -788,77 +842,100 @@ function parseSseChunk(buffer,onEvent){
   return buffer;
 }
 
+async function vmAgentPostJson(prompt,mode){
+  return await api("/vm-agent/task",{
+    method:"POST",
+    headers:{"Content-Type":"application/json"},
+    signal:AbortSignal.timeout(305000),
+    body:JSON.stringify({prompt,mode})
+  });
+}
+
 async function runVmAgentTask(){
   const input=document.getElementById("vmAgentTask");
   const mode=document.getElementById("vmAgentMode").value;
   const button=document.getElementById("vmAgentRunButton");
-  const output=document.getElementById("vmAgentOutput");
   const meta=document.getElementById("vmAgentMeta");
   const prompt=input.value.trim();
-  if(!prompt)return;
+  if(!prompt||button.disabled)return;
 
+  const fullPrompt=buildVmAgentPrompt(prompt);
+  const conversation=loadVmAgentConversation();
+  conversation.push({role:"user",text:prompt,at:new Date().toISOString(),mode});
+  saveVmAgentConversation(conversation);
+  appendVmAgentMessage("user",prompt);
+  input.value="";
   button.disabled=true;
-  output.textContent="Starting VM task…";
-  meta.textContent="Status: starting";
+  meta.textContent="Connecting to VM Agent…";
+  const pending=appendVmAgentMessage("assistant","Thinking…",{pending:true,id:"vmAgentPending"});
   const started=performance.now();
   let finalData=null;
+  let streamFailure=null;
 
   try{
-    const headers=new Headers({"Content-Type":"application/json"});
-    if(authToken)headers.set("Authorization","Bearer "+authToken);
-    const r=await fetch(API_BASE_URL+"/vm-agent/task/stream",{
-      method:"POST",
-      headers,
-      signal:AbortSignal.timeout(305000),
-      body:JSON.stringify({prompt,mode})
-    });
-
-    if(r.status===401){clearAuthToken();showLogin();throw new Error("Your CodePilot session expired. Please sign in again.")}
-    if(!r.ok){
-      const d=await r.json().catch(()=>({}));
-      throw new Error(d.error||("HTTP "+r.status));
-    }
-
-    const ct=r.headers.get("content-type")||"";
-    if(ct.includes("text/event-stream")&&r.body){
-      const reader=r.body.getReader(),decoder=new TextDecoder();
-      let buffer="";
+    try{
+      const headers=new Headers({"Content-Type":"application/json"});
+      if(authToken)headers.set("Authorization","Bearer "+authToken);
+      const r=await fetch(API_BASE_URL+"/vm-agent/task/stream",{
+        method:"POST",headers,signal:AbortSignal.timeout(305000),
+        body:JSON.stringify({prompt:fullPrompt,mode})
+      });
+      if(r.status===401){clearAuthToken();showLogin();throw new Error("Your CodePilot session expired. Please sign in again.")}
+      if(!r.ok){
+        const d=await r.json().catch(()=>({}));
+        throw new Error(d.error||("HTTP "+r.status));
+      }
+      const ct=r.headers.get("content-type")||"";
+      if(!ct.includes("text/event-stream")||!r.body)throw new Error("Streaming connection was unavailable.");
+      const reader=r.body.getReader(),decoder=new TextDecoder();let buffer="";
       for(;;){
-        const {value,done}=await reader.read();
-        if(done)break;
+        const {value,done}=await reader.read();if(done)break;
         buffer+=decoder.decode(value,{stream:true});
         buffer=parseSseChunk(buffer,(event,dataText)=>{
           let data={};try{data=JSON.parse(dataText)}catch{data={text:dataText}}
           if(event==="status"){
             const stage=data.stage||data.status||data.message||"working";
             meta.textContent="Status: "+stage+" · "+((performance.now()-started)/1000).toFixed(1)+" s";
-          }else if(event==="progress"||event==="message"||event==="tool"){
-            const text=data.text||data.message||data.tool||"";
-            if(text)output.textContent=text;
           }else if(event==="result"){
+            if(data.ok===false||data.error)throw new Error(data.error||"VM Agent task failed.");
             finalData=data;
-            renderVmAgentResult(data.result||"(No text response)");
           }
         });
       }
-    }else{
-      finalData=await r.json();
-      renderVmAgentResult(finalData.result||"(No text response)");
+      if(!finalData)throw new Error("The stream ended before the VM Agent returned a response.");
+    }catch(e){
+      streamFailure=e;
+      meta.textContent="Stream interrupted — retrying normally…";
+      finalData=await vmAgentPostJson(fullPrompt,mode);
     }
 
-    const d=finalData||{};
-    const t=d.tokens||{};
-    const elapsed=((performance.now()-started)/1000).toFixed(1);
-    meta.textContent="Status: "+(d.status||"completed")+" · "+elapsed+" s"+(t.total!=null?" · "+formatTokens(t.total)+" tokens":"");
+    if(finalData?.ok===false||finalData?.error)throw new Error(finalData.error||"VM Agent task failed.");
+    const result=String(finalData?.result||"").trim();
+    if(!result)throw new Error("The VM Agent completed the request but returned an empty response.");
+
+    pending?.remove();
+    appendVmAgentMessage("assistant",result);
+    const updated=loadVmAgentConversation();
+    updated.push({role:"assistant",text:result,at:new Date().toISOString(),mode});
+    saveVmAgentConversation(updated);
+
+    const t=finalData.tokens||{},elapsed=((performance.now()-started)/1000).toFixed(1);
+    meta.textContent="Status: completed · "+elapsed+" s"+(streamFailure?" · recovered after stream retry":"")+(t.total!=null?" · "+formatTokens(t.total)+" tokens":"");
     setVmAgentStatus("online","Connected");
-    addVmAgentHistory({at:new Date().toISOString(),prompt,mode,result:d.result||output.textContent,tokens:t.total??null});
+    addVmAgentHistory({at:new Date().toISOString(),prompt,mode,result,tokens:t.total??null});
   }catch(e){
-    output.textContent="VM Agent error: "+(e.message||e);
+    pending?.remove();
+    const message=e?.message||String(e);
+    appendVmAgentMessage("assistant","I couldn't complete that request. "+message,{error:true});
+    const updated=loadVmAgentConversation();
+    updated.push({role:"assistant",text:"I couldn't complete that request. "+message,error:true,at:new Date().toISOString(),mode});
+    saveVmAgentConversation(updated);
     meta.textContent="Status: failed";
-    setVmAgentStatus("offline",e.message||"Offline");
-    addVmAgentHistory({at:new Date().toISOString(),prompt,mode,error:e.message||String(e)});
+    addVmAgentHistory({at:new Date().toISOString(),prompt,mode,error:message});
+    checkVmAgent(false);
   }finally{
     button.disabled=false;
+    input.focus();
   }
 }
 
