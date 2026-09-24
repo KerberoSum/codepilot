@@ -807,30 +807,117 @@ function setVmAgentPreset(prompt,mode="read",web=false){
 
 function vmAgentWebEnabled(){return document.getElementById("vmAgentWeb")?.checked===true;}
 
-const VM_AGENT_CHAT_KEY="codepilot-vm-agent-chat-v1";
-
-function loadVmAgentConversation(){
+async function loadVmChats(openRecent=false){
   try{
-    const data=JSON.parse(localStorage.getItem(VM_AGENT_CHAT_KEY)||"[]");
-    return Array.isArray(data)?data.slice(-30):[];
-  }catch{return []}
+    const d=await api("/vm-agent/chats");
+    vmChats=Array.isArray(d.chats)?d.chats:[];
+    renderVmChatSelect();
+    if(openRecent&&!currentVmChat&&vmChats.length)await openVmChat(vmChats[0].id);
+  }catch(e){
+    vmChats=[];renderVmChatSelect();
+    document.getElementById("vmAgentMeta").textContent="VM chat history unavailable · "+(e.message||e);
+  }
 }
 
-function saveVmAgentConversation(items){
-  try{localStorage.setItem(VM_AGENT_CHAT_KEY,JSON.stringify(items.slice(-30)))}catch{}
+function renderVmChatSelect(){
+  const select=document.getElementById("vmChatSelect");if(!select)return;
+  const active=currentVmChat?.id||"";
+  select.innerHTML='<option value="">New VM Chat</option>';
+  vmChats.forEach(chat=>{
+    const option=document.createElement("option");
+    option.value=chat.id;option.textContent=chat.title||"VM Chat";select.appendChild(option);
+  });
+  select.value=vmChats.some(x=>x.id===active)?active:"";
+}
+
+async function vmChatSelectChanged(){
+  const id=document.getElementById("vmChatSelect")?.value||"";
+  if(!id){newVmChat();return}
+  await openVmChat(id);
+}
+
+async function openVmChat(id){
+  try{
+    const d=await api("/vm-agent/chats/"+encodeURIComponent(id));
+    currentVmChat=d.chat||null;
+    vmAgentMessages=(Array.isArray(d.messages)?d.messages:[]).map(m=>({
+      id:m.id,role:m.role,text:m.content||"",at:m.created_at,mode:m.mode||"read",web:!!Number(m.web),error:!!Number(m.error)
+    }));
+    if(currentVmChat){
+      document.getElementById("vmAgentMode").value=currentVmChat.mode||"read";
+      document.getElementById("vmAgentWeb").checked=!!Number(currentVmChat.web);
+    }
+    renderVmChatSelect();renderVmAgentConversation();
+  }catch(e){
+    document.getElementById("vmAgentMeta").textContent="Could not open VM chat · "+(e.message||e);
+  }
+}
+
+function newVmChat(){
+  currentVmChat=null;vmAgentMessages=[];
+  renderVmChatSelect();renderVmAgentConversation();
+  const input=document.getElementById("vmAgentTask");if(input)input.value="";
+  document.getElementById("vmAgentMeta").textContent="";
+  input?.focus();
+}
+
+async function ensureVmChat(firstPrompt,mode,web){
+  if(currentVmChat)return currentVmChat;
+  const title=String(firstPrompt||"New VM Chat").replace(/\s+/g," ").trim().slice(0,58)||"New VM Chat";
+  const d=await api("/vm-agent/chats",{
+    method:"POST",headers:{"Content-Type":"application/json"},
+    body:JSON.stringify({title,mode,web})
+  });
+  currentVmChat=d.chat;
+  await loadVmChats(false);
+  renderVmChatSelect();
+  return currentVmChat;
+}
+
+async function saveVmChatMessage(role,content,mode,web,error=false){
+  if(!currentVmChat)return null;
+  const d=await api("/vm-agent/chats/"+encodeURIComponent(currentVmChat.id)+"/messages",{
+    method:"POST",headers:{"Content-Type":"application/json"},
+    body:JSON.stringify({role,content,mode,web,error})
+  });
+  return d.message||null;
+}
+
+async function renameVmChat(){
+  if(!currentVmChat)return alert("Open a VM chat first.");
+  const title=await askInput("Rename VM chat","Enter a new chat name.",currentVmChat.title||"VM Chat");
+  if(!title)return;
+  try{
+    const d=await api("/vm-agent/chats/"+encodeURIComponent(currentVmChat.id),{
+      method:"PATCH",headers:{"Content-Type":"application/json"},body:JSON.stringify({title})
+    });
+    currentVmChat={...currentVmChat,...(d.chat||{}),title};
+    await loadVmChats(false);renderVmChatSelect();
+  }catch(e){alert(e.message)}
+}
+
+async function deleteVmChat(){
+  if(!currentVmChat)return alert("Open a VM chat first.");
+  const ok=await askConfirm("Delete VM chat?",'Delete "'+(currentVmChat.title||"VM Chat")+'" and its messages?',{confirmLabel:"Delete",danger:true});
+  if(!ok)return;
+  try{
+    await api("/vm-agent/chats/"+encodeURIComponent(currentVmChat.id),{method:"DELETE"});
+    currentVmChat=null;vmAgentMessages=[];
+    await loadVmChats(false);renderVmAgentConversation();
+    if(vmChats.length)await openVmChat(vmChats[0].id);
+  }catch(e){alert(e.message)}
 }
 
 function renderVmAgentConversation(){
   const box=document.getElementById("vmAgentConversation");
   if(!box)return;
-  const items=loadVmAgentConversation();
   box.innerHTML="";
-  if(!items.length){
+  if(!vmAgentMessages.length){
     const empty=document.createElement("div");empty.className="agent-rich-output";
-    empty.textContent="Start a conversation with your VM Agent.";
+    empty.textContent=currentVmChat?"This VM chat has no messages yet.":"Start a new VM Agent conversation.";
     box.appendChild(empty);return;
   }
-  items.forEach(item=>appendVmAgentMessage(item.role,item.text,{error:item.error,scroll:false}));
+  vmAgentMessages.forEach(item=>appendVmAgentMessage(item.role,item.text,{error:item.error,scroll:false}));
   box.parentElement.scrollTop=box.parentElement.scrollHeight;
 }
 
@@ -847,24 +934,17 @@ function appendVmAgentMessage(role,text,{error=false,pending=false,scroll=true,i
   return wrap;
 }
 
-function clearVmAgentCurrent(){
-  try{localStorage.removeItem(VM_AGENT_CHAT_KEY)}catch{}
-  const input=document.getElementById("vmAgentTask"),meta=document.getElementById("vmAgentMeta");
-  if(input)input.value="";
-  if(meta)meta.textContent="";
-  renderVmAgentConversation();
-  input?.focus();
-}
+function clearVmAgentCurrent(){newVmChat();}
 
 function vmAgentKeydown(e){
   if(e.key==="Enter"&&!e.shiftKey&&!e.isComposing){e.preventDefault();runVmAgentTask();}
 }
 
 function buildVmAgentPrompt(prompt){
-  const prior=loadVmAgentConversation().slice(-10);
-  const lines=prior.map(m=>(m.role==="user"?"User":"Assistant")+": "+String(m.text||"").slice(0,900));
+  const prior=vmAgentMessages.slice(-12);
+  const lines=prior.map(m=>(m.role==="user"?"User":"Assistant")+": "+String(m.text||"").slice(0,1100));
   let context=lines.join("\n\n");
-  if(context.length>5200)context=context.slice(-5200);
+  if(context.length>7000)context=context.slice(-7000);
   return context
     ? "Continue this conversation naturally. Use the recent conversation only as context; perform the newest request.\n\nRECENT CONVERSATION:\n"+context+"\n\nNEW USER MESSAGE:\n"+prompt
     : prompt;
@@ -923,8 +1003,7 @@ function clearVmAgentHistory(){
 }
 
 async function copyVmAgentOutput(){
-  const items=loadVmAgentConversation();
-  const last=[...items].reverse().find(x=>x.role==="assistant"&&!x.error);
+  const last=[...vmAgentMessages].reverse().find(x=>x.role==="assistant"&&!x.error);
   if(!last)return;
   try{await navigator.clipboard.writeText(last.text||"")}catch{}
 }
