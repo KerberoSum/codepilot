@@ -166,7 +166,7 @@ button,input,textarea,select{font:inherit}button{cursor:pointer}.hidden{display:
 .agent-mission-list{display:flex;flex-direction:column;gap:6px;margin-bottom:14px}.agent-mission{border:1px solid var(--border);background:var(--panel2);border-radius:8px;padding:8px}.agent-mission-top{display:flex;gap:6px;align-items:center}.agent-mission-title{min-width:0;flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-size:9px;color:#fff}.agent-mission-status{font-size:8px;border-radius:999px;padding:2px 6px;background:var(--panel3);color:var(--muted)}.agent-mission-status.running{color:var(--yellow)}.agent-mission-status.completed{color:var(--green)}.agent-mission-status.failed,.agent-mission-status.cancelled,.agent-mission-status.interrupted{color:var(--red)}.agent-mission-meta{margin-top:5px;color:var(--muted);font-size:8px;line-height:1.4}.agent-mission-actions{display:flex;gap:5px;margin-top:6px}
 .agent-mission-btn{border:1px solid var(--border);background:transparent;color:var(--muted);border-radius:6px;padding:4px 6px;font-size:8px}.agent-mission-btn:hover{color:#fff;background:var(--panel3)}
 .agent-mission-run{border-color:rgba(116,87,255,.5);color:#b9acff}.agent-side-hint{font-size:8px;color:var(--muted2);line-height:1.45;margin:-3px 0 8px}
-@media(max-width:760px){.agent-page-top{padding:0 9px}.agent-page-brand span{display:none}.agent-page-actions{gap:4px}.agent-page-tab{padding:6px 8px;font-size:9px}.agent-page-body{display:block}.agent-side{display:none}.agent-main{height:100%}.agent-main-head{padding:9px}.agent-transcript{padding:12px}.agent-composer{padding:9px}.agent-rich-output{min-height:140px}.agent-main-controls .agent-page-tab{display:none}}
+@media(max-width:760px){.agent-page-top{padding:0 9px}.agent-page-brand span{display:none}.agent-page-actions{gap:4px}.agent-page-tab{padding:6px 8px;font-size:9px}.agent-page-body{display:block}.agent-side{display:none}.agent-side.mobile-open{display:block;position:fixed;z-index:85;left:0;top:58px;bottom:0;width:min(330px,88vw);box-shadow:20px 0 60px rgba(0,0,0,.5)}.agent-main{height:100%}.agent-main-head{padding:9px}.agent-transcript{padding:12px}.agent-composer{padding:9px}.agent-rich-output{min-height:140px}.agent-main-controls .agent-page-tab{display:none}.agent-panel-toggle{display:inline-flex!important}}
 
 /* PREVIEW */
 .preview-toolbar{height:34px;display:flex;align-items:center;justify-content:space-between;padding:0 10px;border-bottom:1px solid var(--border);background:var(--panel);color:var(--muted);font-size:10px}
@@ -404,6 +404,14 @@ button,input,textarea,select{font:inherit}button{cursor:pointer}.hidden{display:
         <div class="agent-capability"><span>Web browser</span><b id="browserCapability">Checking…</b></div>
       </div>
 
+      <div class="agent-side-title">LIVE VM</div>
+      <div class="agent-stat-grid">
+        <div class="agent-stat"><span>CPU / load</span><b id="workerCpu">—</b></div>
+        <div class="agent-stat"><span>RAM used</span><b id="workerRam">—</b></div>
+        <div class="agent-stat"><span>Disk used</span><b id="workerDisk">—</b></div>
+        <div class="agent-stat"><span>Queue</span><b id="workerQueue">—</b></div>
+      </div>
+
       <div class="agent-side-title">QUICK TASKS</div>
       <div class="agent-quick-grid">
         <button class="agent-quick" onclick="setVmAgentPreset('Report CPU load, RAM usage, swap usage, disk usage, and uptime. Flag anything unusual.','read')">System health</button>
@@ -442,6 +450,7 @@ button,input,textarea,select{font:inherit}button{cursor:pointer}.hidden{display:
           <div><strong>Remote Worker</strong><br><span id="vmAgentStatusText">Not checked</span></div>
         </div>
         <div class="agent-main-controls">
+          <button class="agent-secondary agent-panel-toggle" style="display:none" onclick="toggleAgentPanel()">Worker panel</button>
           <label for="vmAgentMode" style="font-size:9px;color:var(--muted)">Mode</label>
           <select id="vmAgentMode">
             <option value="read">Read only</option>
@@ -733,6 +742,7 @@ function setVmAgentPreset(prompt,mode="read",web=false){
   if(input)input.value=prompt;
   if(select)select.value=mode;
   if(webToggle)webToggle.checked=!!web;
+  if(window.innerWidth<=760)toggleAgentPanel(false);
   input?.focus();
 }
 
@@ -973,17 +983,35 @@ async function runVmAgentTask(){
   }
 }
 
+function formatWorkerBytes(value){
+  const n=Number(value||0);if(!n)return "—";
+  const units=["B","KB","MB","GB","TB"];let x=n,i=0;
+  while(x>=1024&&i<units.length-1){x/=1024;i++}
+  return (x>=10||i===0?x.toFixed(0):x.toFixed(1))+" "+units[i];
+}
+
+function toggleAgentPanel(force){
+  const panel=document.querySelector(".agent-side");if(!panel)return;
+  const open=typeof force==="boolean"?force:!panel.classList.contains("mobile-open");
+  panel.classList.toggle("mobile-open",open);
+}
+
 async function loadVmCapabilities(){
   const worker=document.getElementById("remoteWorkerCapability"),browser=document.getElementById("browserCapability");
   try{
     const d=await api("/vm-agent/capabilities",{signal:AbortSignal.timeout(12000)});
     if(worker){worker.textContent=d.remote_worker?"Ready":"Unavailable";worker.className=d.remote_worker?"ready":"offline";}
-    const b=d.browser||{};
+    const b=d.browser||{},s=d.system||{},q=d.queue||{};
     if(browser){
       browser.textContent=b.available?(b.controller||"Ready"):(b.chromium_detected?"Setup needed":"Not installed");
       browser.className=b.available?"ready":"warn";
       browser.title=b.available?"Interactive headless web control is available.":"Install VM browser tools to enable interactive browsing.";
     }
+    const cpu=document.getElementById("workerCpu"),ram=document.getElementById("workerRam"),disk=document.getElementById("workerDisk"),queue=document.getElementById("workerQueue");
+    if(cpu)cpu.textContent=(s.cpu_count||"—")+"c · "+(s.load_1m??"—");
+    if(ram)ram.textContent=s.memory_total_bytes?Math.round((Number(s.memory_used_bytes||0)/Number(s.memory_total_bytes))*100)+"%":"—";
+    if(disk)disk.textContent=s.disk_total_bytes?Math.round((Number(s.disk_used_bytes||0)/Number(s.disk_total_bytes))*100)+"%":"—";
+    if(queue)queue.textContent=(q.running||0)+" run · "+(q.queued||0)+" wait";
   }catch(e){
     if(worker){worker.textContent="Offline";worker.className="offline"}
     if(browser){browser.textContent="Unknown";browser.className="offline"}
@@ -1036,6 +1064,7 @@ async function queueVmMission(){
       body:JSON.stringify({prompt,mode,web,title:prompt.split(/\n/)[0].slice(0,72)})
     });
     input.value="";
+    if(window.innerWidth<=760)toggleAgentPanel(false);
     document.getElementById("vmAgentMeta").textContent="Mission queued · "+(d.mission?.id||"");
     await loadVmMissions();
   }catch(e){
