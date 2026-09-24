@@ -1,13 +1,14 @@
-# CodePilot Remote Worker v3
+# CodePilot Remote Worker v3.1
 
 CodePilot's VM Agent can now operate as a small remote worker rather than only a one-shot task runner.
 
 ## Core capabilities
 
-- normal conversational chat from CodePilot
+- persistent VM Agent chat sessions stored in Cloudflare D1, with new/open/rename/delete controls like Workspace chat
 - Read-only and Workspace permission modes
 - optional public-web access per chat message or mission
 - background Missions that continue on the VM after the browser disconnects
+- a third CodePilot **Terminal** page for authenticated shell commands through the existing Worker/tunnel path
 - one-work-item-at-a-time execution to protect the 2-OCPU VM
 - persistent mission history in `/srv/codepilot-agent/missions.json`
 - mission cancellation for queued/running work
@@ -22,7 +23,7 @@ Use **chat** for quick interactive requests.
 
 Use **Queue mission** for work that may take longer. The browser only submits the mission; Goose runs it on the VM. You can leave the Agent page and later return to see whether it is queued, running, completed, failed, cancelled, or interrupted.
 
-Execution concurrency stays at one task at a time by design. This avoids multiple Goose/browser jobs competing for the VM's limited CPU.
+Execution concurrency stays at one Goose work item at a time by design. Chat requests now wait behind an active task instead of immediately failing with a busy error. The Agent UI can also stop the current work item.
 
 ## Web/browser access
 
@@ -57,7 +58,7 @@ sudo bash vm-agent/upgrade-v3.sh
 
 It installs the v3 server/unit, refreshes the Quick Tunnel helper, installs browser tooling, restarts the services, and prints a local health check. Use `--skip-browser` only if you intentionally do not want Trailblaze installed.
 
-The health response should report version 3.
+The health response should report version 3.1.
 
 ## Worker endpoints
 
@@ -65,6 +66,12 @@ The Cloudflare Worker keeps VM credentials away from browser JavaScript and prox
 
 - `GET /vm-agent/health`
 - `GET /vm-agent/capabilities`
+- `GET /vm-agent/status`
+- `DELETE /vm-agent/task/current`
+- `POST /vm-agent/terminal`
+- `GET/POST /vm-agent/chats`
+- `GET/PATCH/DELETE /vm-agent/chats/:id`
+- `POST /vm-agent/chats/:id/messages`
 - `POST /vm-agent/task`
 - `POST /vm-agent/task/stream`
 - `GET /vm-agent/missions`
@@ -92,3 +99,9 @@ Do not expose these values in frontend code.
 Read mode cannot modify files or system state. Workspace mode may only modify files below `/srv/codepilot-workspace`. Neither mode may use sudo, install packages, change services, users, firewall/network configuration, mounts, or OCI settings through an ordinary task.
 
 Browser content is treated as untrusted input. External side-effect actions are not automatically authorized simply because Web access is enabled.
+
+## Browser terminal
+
+The CodePilot Terminal does **not** expose port 22 or send SSH credentials to the browser. Browser requests stay inside the existing authenticated CodePilot Worker → Quick Tunnel → VM Agent path. Commands execute as the dedicated `codepilot-agent` service account.
+
+It preserves the working directory between commands and supports ordinary shell commands, file editing through non-interactive commands, Git, diagnostics, and scripts. It intentionally does not provide root/sudo access or full-screen interactive TTY programs in this first version. Systemd hardening remains in force, so protected system paths are read-only while the CodePilot workspace and agent data directories remain writable.
