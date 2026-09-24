@@ -17,7 +17,7 @@ CodePilot has two separately deployed parts:
    - `VM_MODEL_GATEWAY_SECRET` — separate secret for the VM-to-CodePilot OpenAI-compatible model gateway.
    The frontend never receives these VM secrets; authenticated browser requests are proxied through the Worker.
 
-VM Agent v2 files live in `vm-agent/`. They add task history/status, streaming-compatible task transport, an auto-registering Quick Tunnel helper, a hardened service template, and the CodePilot model gateway.
+Remote Worker v3 files live in `vm-agent/`. They add conversational VM chat, background Missions, lightweight VM resource status, optional headless web/browser control through Trailblaze, automatic Quick Tunnel registration, a hardened service template, and the CodePilot model gateway. See `vm-agent/README.md` for the VM upgrade and browser-tool installation steps.
 
 ## Netlify settings
 
