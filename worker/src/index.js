@@ -168,6 +168,36 @@ export default {
         `).run();
       }
 
+      async function ensureVmChatTables() {
+        await env.DB.prepare(`
+          CREATE TABLE IF NOT EXISTS vm_agent_chats (
+            id TEXT PRIMARY KEY,
+            title TEXT NOT NULL,
+            created_at INTEGER NOT NULL,
+            updated_at INTEGER NOT NULL,
+            mode TEXT NOT NULL DEFAULT 'read',
+            web INTEGER NOT NULL DEFAULT 0
+          )
+        `).run();
+        await env.DB.prepare(`
+          CREATE TABLE IF NOT EXISTS vm_agent_messages (
+            id TEXT PRIMARY KEY,
+            chat_id TEXT NOT NULL,
+            role TEXT NOT NULL,
+            content TEXT NOT NULL,
+            created_at INTEGER NOT NULL,
+            mode TEXT NOT NULL DEFAULT 'read',
+            web INTEGER NOT NULL DEFAULT 0,
+            error INTEGER NOT NULL DEFAULT 0,
+            FOREIGN KEY (chat_id) REFERENCES vm_agent_chats(id) ON DELETE CASCADE
+          )
+        `).run();
+        await env.DB.prepare(`
+          CREATE INDEX IF NOT EXISTS idx_vm_agent_messages_chat_created
+          ON vm_agent_messages(chat_id, created_at)
+        `).run();
+      }
+
       async function getVmAgentBase() {
         try {
           await ensureVmRuntimeTable();
@@ -635,6 +665,155 @@ export default {
           }, 502);
         }
 
+      }
+
+
+      /* =====================================================
+         VM AGENT CHAT SESSIONS
+      ===================================================== */
+
+      if (path === "/vm-agent/chats" && request.method === "GET") {
+        try {
+          await ensureVmChatTables();
+          const result = await env.DB.prepare(`
+            SELECT id, title, created_at, updated_at, mode, web
+            FROM vm_agent_chats
+            ORDER BY updated_at DESC
+            LIMIT 100
+          `).all();
+          return json({ success: true, chats: result.results || [] });
+        } catch (error) {
+          return json({ success: false, error: "Could not load VM Agent chats: " + (error?.message || String(error)) }, 500);
+        }
+      }
+
+      if (path === "/vm-agent/chats" && request.method === "POST") {
+        const body = await safeJSON(request);
+        const id = crypto.randomUUID();
+        const now = Date.now();
+        const rawTitle = String(body?.title || "New VM Chat").trim();
+        const title = (rawTitle || "New VM Chat").slice(0, 120);
+        const mode = body?.mode === "workspace" ? "workspace" : "read";
+        const web = body?.web === true ? 1 : 0;
+        try {
+          await ensureVmChatTables();
+          await env.DB.prepare(`
+            INSERT INTO vm_agent_chats (id, title, created_at, updated_at, mode, web)
+            VALUES (?, ?, ?, ?, ?, ?)
+          `).bind(id, title, now, now, mode, web).run();
+          return json({ success: true, chat: { id, title, created_at: now, updated_at: now, mode, web } });
+        } catch (error) {
+          return json({ success: false, error: "Could not create VM Agent chat: " + (error?.message || String(error)) }, 500);
+        }
+      }
+
+      const vmChatMatch = path.match(/^\/vm-agent\/chats\/([^/]+)$/);
+      if (vmChatMatch) {
+        const chatId = decodeURIComponent(vmChatMatch[1]);
+        await ensureVmChatTables();
+
+        if (request.method === "GET") {
+          const chat = await env.DB.prepare(`
+            SELECT id, title, created_at, updated_at, mode, web
+            FROM vm_agent_chats WHERE id = ? LIMIT 1
+          `).bind(chatId).first();
+          if (!chat) return json({ success: false, error: "VM Agent chat not found." }, 404);
+          const messages = await env.DB.prepare(`
+            SELECT id, role, content, created_at, mode, web, error
+            FROM vm_agent_messages
+            WHERE chat_id = ?
+            ORDER BY created_at ASC
+          `).bind(chatId).all();
+          return json({ success: true, chat, messages: messages.results || [] });
+        }
+
+        if (request.method === "PATCH") {
+          const body = await safeJSON(request);
+          const current = await env.DB.prepare("SELECT * FROM vm_agent_chats WHERE id = ? LIMIT 1").bind(chatId).first();
+          if (!current) return json({ success: false, error: "VM Agent chat not found." }, 404);
+          const title = String(body?.title ?? current.title).trim().slice(0, 120) || "VM Chat";
+          const mode = body?.mode === "workspace" ? "workspace" : body?.mode === "read" ? "read" : current.mode;
+          const web = typeof body?.web === "boolean" ? (body.web ? 1 : 0) : Number(current.web || 0);
+          await env.DB.prepare(`
+            UPDATE vm_agent_chats SET title = ?, mode = ?, web = ?, updated_at = ? WHERE id = ?
+          `).bind(title, mode, web, Date.now(), chatId).run();
+          return json({ success: true, chat: { ...current, title, mode, web, updated_at: Date.now() } });
+        }
+
+        if (request.method === "DELETE") {
+          await env.DB.batch([
+            env.DB.prepare("DELETE FROM vm_agent_messages WHERE chat_id = ?").bind(chatId),
+            env.DB.prepare("DELETE FROM vm_agent_chats WHERE id = ?").bind(chatId)
+          ]);
+          return json({ success: true });
+        }
+      }
+
+      const vmChatMessagesMatch = path.match(/^\/vm-agent\/chats\/([^/]+)\/messages$/);
+      if (vmChatMessagesMatch && request.method === "POST") {
+        const chatId = decodeURIComponent(vmChatMessagesMatch[1]);
+        const body = await safeJSON(request);
+        const role = body?.role === "assistant" ? "assistant" : "user";
+        const content = String(body?.content || "");
+        const mode = body?.mode === "workspace" ? "workspace" : "read";
+        const web = body?.web === true ? 1 : 0;
+        const error = body?.error === true ? 1 : 0;
+        if (!content.trim()) return json({ success: false, error: "Message content is required." }, 400);
+        await ensureVmChatTables();
+        const exists = await env.DB.prepare("SELECT id FROM vm_agent_chats WHERE id = ? LIMIT 1").bind(chatId).first();
+        if (!exists) return json({ success: false, error: "VM Agent chat not found." }, 404);
+        const id = crypto.randomUUID();
+        const now = Date.now();
+        await env.DB.batch([
+          env.DB.prepare(`
+            INSERT INTO vm_agent_messages (id, chat_id, role, content, created_at, mode, web, error)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+          `).bind(id, chatId, role, content, now, mode, web, error),
+          env.DB.prepare(`
+            UPDATE vm_agent_chats SET mode = ?, web = ?, updated_at = ? WHERE id = ?
+          `).bind(mode, web, now, chatId)
+        ]);
+        return json({ success: true, message: { id, chat_id: chatId, role, content, created_at: now, mode, web, error } });
+      }
+
+
+      /* =====================================================
+         REMOTE WORKER STATUS + TERMINAL
+      ===================================================== */
+
+      if (path === "/vm-agent/status" && request.method === "GET") {
+        try {
+          const data = await callVmAgentJson("/agent/status", { timeout: 12000 });
+          return json({ success: true, ...data });
+        } catch (error) {
+          return json({ success: false, error: error?.message || String(error) }, 502);
+        }
+      }
+
+      if (path === "/vm-agent/task/current" && request.method === "DELETE") {
+        try {
+          const data = await callVmAgentJson("/agent/task/current", { method: "DELETE", timeout: 12000 });
+          return json({ success: true, ...data });
+        } catch (error) {
+          return json({ success: false, error: error?.message || String(error) }, 502);
+        }
+      }
+
+      if (path === "/vm-agent/terminal" && request.method === "POST") {
+        const body = await safeJSON(request);
+        const command = String(body?.command || "").trim();
+        const cwd = String(body?.cwd || "").trim();
+        if (!command) return json({ success: false, error: "Terminal command is required." }, 400);
+        try {
+          const data = await callVmAgentJson("/agent/terminal", {
+            method: "POST",
+            body: { command, cwd: cwd || undefined },
+            timeout: 55000
+          });
+          return json({ success: true, ...data });
+        } catch (error) {
+          return json({ success: false, error: error?.message || String(error) }, 502);
+        }
       }
 
 
