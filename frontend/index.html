@@ -652,7 +652,7 @@ async function init(){
     const health=await api("/health");
     if(Number(health.version)!==2) throw new Error("Worker is not Version 2.");
     setWorkerIndicator("online","Online",`Worker and D1 responded in ${Number(health.latencyMs||0)} ms`);
-    await Promise.all([loadProjects(),loadChats(),loadUsage(),loadModels(false)]);
+    await Promise.all([loadProjects(),loadChats(),loadUsage(),loadModels(false),loadVmChats(false)]);
     updateContextUI();renderProjectChats();
     clearInterval(healthTimer);healthTimer=setInterval(()=>checkWorkerHealth(false),60000);
     setStatus("Ready");
@@ -774,21 +774,24 @@ async function checkVmAgent(showError=false){
 }
 
 function switchAppPage(page){
-  const agent=document.getElementById("agentPage");
+  const agent=document.getElementById("agentPage"),terminal=document.getElementById("terminalPage");
+  agent?.classList.toggle("hidden",page!=="agent");
+  terminal?.classList.toggle("hidden",page!=="terminal");
+
+  clearInterval(vmMissionTimer);vmMissionTimer=null;
+
   if(page==="agent"){
-    agent?.classList.remove("hidden");
     renderVmAgentHistory();
-    renderVmAgentConversation();
+    if(!currentVmChat&&vmChats.length)openVmChat(vmChats[0].id);else renderVmAgentConversation();
     checkVmAgent(false);
     loadVmCapabilities().catch(()=>{});
     loadVmMissions().catch(()=>{});
-    clearInterval(vmMissionTimer);
     vmMissionTimer=setInterval(()=>loadVmMissions().catch(()=>{}),8000);
     setTimeout(()=>document.getElementById("vmAgentTask")?.focus(),30);
-  }else{
-    agent?.classList.add("hidden");
-    clearInterval(vmMissionTimer);
-    vmMissionTimer=null;
+  }else if(page==="terminal"){
+    checkVmAgent(false);
+    updateTerminalCwd();
+    setTimeout(()=>document.getElementById("terminalInput")?.focus(),30);
   }
 }
 
@@ -1041,19 +1044,21 @@ async function runVmAgentTask(){
   if(!prompt||button.disabled)return;
 
   const fullPrompt=buildVmAgentPrompt(prompt);
-  const conversation=loadVmAgentConversation();
-  conversation.push({role:"user",text:prompt,at:new Date().toISOString(),mode,web});
-  saveVmAgentConversation(conversation);
-  appendVmAgentMessage("user",prompt);
-  input.value="";
   button.disabled=true;
-  meta.textContent="Connecting to VM Agent…";
-  const pending=appendVmAgentMessage("assistant","Thinking…",{pending:true,id:"vmAgentPending"});
+  input.value="";
+  meta.textContent="Queueing with Remote Worker…";
   const started=performance.now();
-  let finalData=null;
-  let streamFailure=null;
+  let finalData=null,streamFailure=null,pending=null;
 
   try{
+    await ensureVmChat(prompt,mode,web);
+    const savedUser=await saveVmChatMessage("user",prompt,mode,web,false);
+    vmAgentMessages.push({
+      id:savedUser?.id||null,role:"user",text:prompt,at:savedUser?.created_at||Date.now(),mode,web,error:false
+    });
+    renderVmAgentConversation();
+    pending=appendVmAgentMessage("assistant","Waiting for Remote Worker…",{pending:true,id:"vmAgentPending"});
+
     try{
       const headers=new Headers({"Content-Type":"application/json"});
       if(authToken)headers.set("Authorization","Bearer "+authToken);
@@ -1096,10 +1101,12 @@ async function runVmAgentTask(){
     if(!result)throw new Error("The VM Agent completed the request but returned an empty response.");
 
     pending?.remove();
-    appendVmAgentMessage("assistant",result);
-    const updated=loadVmAgentConversation();
-    updated.push({role:"assistant",text:result,at:new Date().toISOString(),mode,web});
-    saveVmAgentConversation(updated);
+    const savedAssistant=await saveVmChatMessage("assistant",result,mode,web,false);
+    vmAgentMessages.push({
+      id:savedAssistant?.id||null,role:"assistant",text:result,at:savedAssistant?.created_at||Date.now(),mode,web,error:false
+    });
+    renderVmAgentConversation();
+    await loadVmChats(false);
 
     const t=finalData.tokens||{},elapsed=((performance.now()-started)/1000).toFixed(1);
     meta.textContent="Status: completed · "+elapsed+" s"+(streamFailure?" · recovered after stream retry":"")+(t.total!=null?" · "+formatTokens(t.total)+" tokens":"");
@@ -1108,10 +1115,18 @@ async function runVmAgentTask(){
   }catch(e){
     pending?.remove();
     const message=e?.message||String(e);
-    appendVmAgentMessage("assistant","I couldn't complete that request. "+message,{error:true});
-    const updated=loadVmAgentConversation();
-    updated.push({role:"assistant",text:"I couldn't complete that request. "+message,error:true,at:new Date().toISOString(),mode,web});
-    saveVmAgentConversation(updated);
+    const text="I couldn't complete that request. "+message;
+    if(currentVmChat){
+      try{
+        const saved=await saveVmChatMessage("assistant",text,mode,web,true);
+        vmAgentMessages.push({id:saved?.id||null,role:"assistant",text,at:saved?.created_at||Date.now(),mode,web,error:true});
+      }catch{
+        vmAgentMessages.push({role:"assistant",text,at:Date.now(),mode,web,error:true});
+      }
+      renderVmAgentConversation();
+    }else{
+      appendVmAgentMessage("assistant",text,{error:true});
+    }
     meta.textContent="Status: failed";
     addVmAgentHistory({at:new Date().toISOString(),prompt,mode,web,error:message});
     checkVmAgent(false);
@@ -1120,6 +1135,15 @@ async function runVmAgentTask(){
     input.focus();
   }
 }
+
+async function stopVmCurrentTask(){
+  const meta=document.getElementById("vmAgentMeta");
+  try{
+    const d=await api("/vm-agent/task/current",{method:"DELETE"});
+    meta.textContent=d.cancelled?"Stopping current Remote Worker task…":(d.message||"No active task.");
+  }catch(e){meta.textContent="Stop failed · "+(e.message||e)}
+}
+
 
 function formatWorkerBytes(value){
   const n=Number(value||0);if(!n)return "—";
@@ -1219,6 +1243,58 @@ function showVmMission(mission){
   const text=mission.result||("Mission failed: "+(mission.error||"Unknown error"));
   appendVmAgentMessage("assistant","**Mission: "+(mission.title||mission.id)+"**\n\n"+text,{error:!!mission.error});
   document.getElementById("vmAgentMeta").textContent="Mission "+(mission.status||"")+" · "+missionTime(mission.completed_at||mission.updated_at);
+}
+
+function updateTerminalCwd(){
+  const el=document.getElementById("terminalCwd");if(el)el.textContent=terminalCwd;
+}
+
+function appendTerminal(text){
+  const out=document.getElementById("terminalOutput");if(!out)return;
+  out.textContent+=String(text||"");
+  out.scrollTop=out.scrollHeight;
+}
+
+function clearTerminal(){
+  const out=document.getElementById("terminalOutput");
+  if(out)out.textContent="";
+  document.getElementById("terminalInput")?.focus();
+}
+
+function terminalKeydown(e){
+  if(e.key==="Enter"&&!e.shiftKey&&!e.isComposing){e.preventDefault();runTerminalCommand();return}
+  if(e.key==="ArrowUp"&&!e.shiftKey){
+    if(!terminalHistory.length)return;
+    e.preventDefault();terminalHistoryIndex=Math.max(0,terminalHistoryIndex-1);
+    e.target.value=terminalHistory[terminalHistoryIndex]||"";
+  }else if(e.key==="ArrowDown"&&!e.shiftKey){
+    if(!terminalHistory.length)return;
+    e.preventDefault();terminalHistoryIndex=Math.min(terminalHistory.length,terminalHistoryIndex+1);
+    e.target.value=terminalHistoryIndex>=terminalHistory.length?"":(terminalHistory[terminalHistoryIndex]||"");
+  }
+}
+
+async function runTerminalCommand(){
+  const input=document.getElementById("terminalInput"),button=document.getElementById("terminalRunButton");
+  const command=input.value.trim();if(!command||button.disabled)return;
+  if(command==="clear"){clearTerminal();input.value="";return}
+  terminalHistory.push(command);terminalHistory=terminalHistory.slice(-100);terminalHistoryIndex=terminalHistory.length;
+  appendTerminal("codepilot-agent@vm:"+terminalCwd+"$ "+command+"\n");
+  input.value="";button.disabled=true;
+  try{
+    const d=await api("/vm-agent/terminal",{
+      method:"POST",headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({command,cwd:terminalCwd})
+    });
+    if(d.output)appendTerminal(d.output+"\n");
+    appendTerminal("[exit "+Number(d.exit_code||0)+"]\n\n");
+    if(d.cwd)terminalCwd=d.cwd;
+    updateTerminalCwd();
+  }catch(e){
+    appendTerminal("terminal error: "+(e.message||e)+"\n\n");
+  }finally{
+    button.disabled=false;input.focus();
+  }
 }
 
 /* =========================================================
