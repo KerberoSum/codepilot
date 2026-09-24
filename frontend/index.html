@@ -1173,7 +1173,8 @@ async function loadVmCapabilities(){
     if(cpu)cpu.textContent=(s.cpu_count||"—")+"c · "+(s.load_1m??"—");
     if(ram)ram.textContent=s.memory_total_bytes?Math.round((Number(s.memory_used_bytes||0)/Number(s.memory_total_bytes))*100)+"%":"—";
     if(disk)disk.textContent=s.disk_total_bytes?Math.round((Number(s.disk_used_bytes||0)/Number(s.disk_total_bytes))*100)+"%":"—";
-    if(queue)queue.textContent=(q.running||0)+" run · "+(q.queued||0)+" wait";
+    if(queue)queue.textContent=(q.active?("1 "+(q.active.kind||"task")):((q.running||0)+" run"))+" · "+(q.queued||0)+" wait";
+    const stop=document.getElementById("vmStopTaskButton");if(stop)stop.disabled=!q.active;
   }catch(e){
     if(worker){worker.textContent="Offline";worker.className="offline"}
     if(browser){browser.textContent="Unknown";browser.className="offline"}
