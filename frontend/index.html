@@ -125,6 +125,9 @@ button,input,textarea,select{font:inherit}button{cursor:pointer}.hidden{display:
 .vm-agent-task:focus{border-color:var(--accent)}
 .vm-agent-output{margin-top:12px;border:1px solid var(--border);background:#090c12;border-radius:9px;padding:11px;min-height:120px;white-space:pre-wrap;overflow-wrap:anywhere;color:#e8edf5;font-size:10px;line-height:1.55}
 .vm-agent-meta{margin-top:7px;color:var(--muted);font-size:9px}
+.vm-agent-history-task{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:#e8edf5}
+.vm-agent-history-result{color:var(--muted);margin-top:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+
 .vm-agent-run{border:1px solid var(--accent);background:var(--accent);color:#fff;border-radius:7px;padding:7px 11px;font-size:10px;font-weight:700}
 .vm-agent-run:disabled{opacity:.55;cursor:wait}
 
@@ -360,6 +363,14 @@ button,input,textarea,select{font:inherit}button{cursor:pointer}.hidden{display:
     <textarea id="vmAgentTask" class="vm-agent-task" placeholder="Example: Check disk usage and report anything unusual."></textarea>
     <div id="vmAgentOutput" class="vm-agent-output">No task run yet.</div>
     <div id="vmAgentMeta" class="vm-agent-meta"></div>
+    <div class="vm-agent-controls" style="margin-top:10px">
+      <button class="modal-btn" onclick="copyVmAgentOutput()">Copy result</button>
+      <button class="modal-btn" onclick="clearVmAgentHistory()">Clear history</button>
+    </div>
+    <div class="storage-section">
+      <h4>Recent VM tasks</h4>
+      <div id="vmAgentHistory" class="storage-list"><div class="storage-empty">No VM tasks yet.</div></div>
+    </div>
     <div class="modal-actions">
       <button class="modal-btn" onclick="closeVmAgent()">Close</button>
     </div>
@@ -593,6 +604,7 @@ async function checkVmAgent(showError=false){
 async function openVmAgent(){
   document.getElementById("vmAgentModal").classList.remove("hidden");
   setTimeout(()=>document.getElementById("vmAgentTask")?.focus(),30);
+  renderVmAgentHistory();
   checkVmAgent(false);
 }
 
@@ -602,6 +614,70 @@ function closeVmAgent(){
 
 function vmAgentOuter(e){
   if(e.target.id==="vmAgentModal")closeVmAgent();
+}
+
+const VM_AGENT_HISTORY_KEY="codepilot-vm-agent-history-v1";
+
+function loadVmAgentHistory(){
+  try{
+    const raw=localStorage.getItem(VM_AGENT_HISTORY_KEY);
+    const data=raw?JSON.parse(raw):[];
+    return Array.isArray(data)?data:[];
+  }catch{return []}
+}
+
+function saveVmAgentHistory(items){
+  try{localStorage.setItem(VM_AGENT_HISTORY_KEY,JSON.stringify(items.slice(0,25)))}catch{}
+}
+
+function addVmAgentHistory(entry){
+  const items=loadVmAgentHistory();
+  items.unshift(entry);
+  saveVmAgentHistory(items);
+  renderVmAgentHistory();
+}
+
+function renderVmAgentHistory(){
+  const box=document.getElementById("vmAgentHistory");
+  if(!box)return;
+  const items=loadVmAgentHistory();
+  if(!items.length){box.innerHTML='<div class="storage-empty">No VM tasks yet.</div>';return}
+  box.innerHTML="";
+  items.forEach(item=>{
+    const row=document.createElement("div");row.className="storage-item";
+    const main=document.createElement("div");main.className="storage-item-main";
+    const t=document.createElement("div");t.className="vm-agent-history-task";t.textContent=(item.mode||"read")+" · "+(item.prompt||"");
+    const r=document.createElement("div");r.className="vm-agent-history-result";r.textContent=item.result||item.error||"";
+    const meta=document.createElement("div");meta.className="storage-item-meta";meta.textContent=new Date(item.at).toLocaleString();
+    main.append(t,r,meta);
+    const reuse=document.createElement("button");reuse.className="storage-delete";reuse.textContent="Reuse";
+    reuse.onclick=()=>{document.getElementById("vmAgentTask").value=item.prompt||"";document.getElementById("vmAgentMode").value=item.mode||"read"};
+    row.append(main,reuse);box.appendChild(row);
+  });
+}
+
+function clearVmAgentHistory(){
+  try{localStorage.removeItem(VM_AGENT_HISTORY_KEY)}catch{}
+  renderVmAgentHistory();
+}
+
+async function copyVmAgentOutput(){
+  const text=document.getElementById("vmAgentOutput")?.textContent||"";
+  try{await navigator.clipboard.writeText(text)}catch{}
+}
+
+function parseSseChunk(buffer,onEvent){
+  let idx;
+  while((idx=buffer.indexOf("\n\n"))>=0){
+    const block=buffer.slice(0,idx);buffer=buffer.slice(idx+2);
+    let event="message",data="";
+    block.split("\n").forEach(line=>{
+      if(line.startsWith("event:"))event=line.slice(6).trim();
+      else if(line.startsWith("data:"))data+=(data?"\n":"")+line.slice(5).trim();
+    });
+    if(data)onEvent(event,data);
+  }
+  return buffer;
 }
 
 async function runVmAgentTask(){
@@ -614,28 +690,65 @@ async function runVmAgentTask(){
   if(!prompt)return;
 
   button.disabled=true;
-  output.textContent="Running on VM…";
-  meta.textContent="";
+  output.textContent="Starting VM task…";
+  meta.textContent="Status: starting";
   const started=performance.now();
+  let finalData=null;
 
   try{
-    const d=await api("/vm-agent/task",{
+    const headers=new Headers({"Content-Type":"application/json"});
+    if(authToken)headers.set("Authorization","Bearer "+authToken);
+    const r=await fetch(API_BASE_URL+"/vm-agent/task/stream",{
       method:"POST",
-      headers:{"Content-Type":"application/json"},
+      headers,
       signal:AbortSignal.timeout(305000),
       body:JSON.stringify({prompt,mode})
     });
-    output.textContent=d.result||"(No text response)";
+
+    if(r.status===401){clearAuthToken();showLogin();throw new Error("Your CodePilot session expired. Please sign in again.")}
+    if(!r.ok){
+      const d=await r.json().catch(()=>({}));
+      throw new Error(d.error||("HTTP "+r.status));
+    }
+
+    const ct=r.headers.get("content-type")||"";
+    if(ct.includes("text/event-stream")&&r.body){
+      const reader=r.body.getReader(),decoder=new TextDecoder();
+      let buffer="";
+      for(;;){
+        const {value,done}=await reader.read();
+        if(done)break;
+        buffer+=decoder.decode(value,{stream:true});
+        buffer=parseSseChunk(buffer,(event,dataText)=>{
+          let data={};try{data=JSON.parse(dataText)}catch{data={text:dataText}}
+          if(event==="status"){
+            const stage=data.stage||data.status||data.message||"working";
+            meta.textContent="Status: "+stage+" · "+((performance.now()-started)/1000).toFixed(1)+" s";
+          }else if(event==="progress"||event==="message"||event==="tool"){
+            const text=data.text||data.message||data.tool||"";
+            if(text)output.textContent=text;
+          }else if(event==="result"){
+            finalData=data;
+            output.textContent=data.result||"(No text response)";
+          }
+        });
+      }
+    }else{
+      finalData=await r.json();
+      output.textContent=finalData.result||"(No text response)";
+    }
+
+    const d=finalData||{};
     const t=d.tokens||{};
     const elapsed=((performance.now()-started)/1000).toFixed(1);
-    meta.textContent=
-      "Status: "+(d.status||"completed")+
-      " · "+elapsed+" s"+
-      (t.total!=null?" · "+formatTokens(t.total)+" tokens":"");
+    meta.textContent="Status: "+(d.status||"completed")+" · "+elapsed+" s"+(t.total!=null?" · "+formatTokens(t.total)+" tokens":"");
     setVmAgentStatus("online","Connected");
+    addVmAgentHistory({at:new Date().toISOString(),prompt,mode,result:output.textContent,tokens:t.total??null});
   }catch(e){
     output.textContent="VM Agent error: "+(e.message||e);
+    meta.textContent="Status: failed";
     setVmAgentStatus("offline",e.message||"Offline");
+    addVmAgentHistory({at:new Date().toISOString(),prompt,mode,error:e.message||String(e)});
   }finally{
     button.disabled=false;
   }
