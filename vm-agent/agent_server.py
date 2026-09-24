@@ -81,6 +81,38 @@ def browser_capability() -> dict:
     }
 
 
+def system_snapshot() -> dict:
+    memory_total = 0
+    memory_available = 0
+    try:
+        for line in Path("/proc/meminfo").read_text(encoding="utf-8").splitlines():
+            key, value = line.split(":", 1)
+            if key == "MemTotal":
+                memory_total = int(value.strip().split()[0]) * 1024
+            elif key == "MemAvailable":
+                memory_available = int(value.strip().split()[0]) * 1024
+    except Exception:
+        pass
+
+    try:
+        uptime_seconds = int(float(Path("/proc/uptime").read_text(encoding="utf-8").split()[0]))
+    except Exception:
+        uptime_seconds = None
+
+    disk = shutil.disk_usage(str(WORKSPACE))
+    load = os.getloadavg()
+    return {
+        "cpu_count": os.cpu_count() or 0,
+        "load_1m": round(load[0], 2),
+        "load_5m": round(load[1], 2),
+        "memory_total_bytes": memory_total,
+        "memory_used_bytes": max(0, memory_total - memory_available) if memory_total else 0,
+        "disk_total_bytes": disk.total,
+        "disk_used_bytes": disk.used,
+        "uptime_seconds": uptime_seconds,
+    }
+
+
 def policy_prompt(req: TaskRequest) -> str:
     if req.mode == "read":
         rules = """MODE: READ ONLY.
@@ -310,6 +342,7 @@ async def health():
         "busy": task_lock.locked(),
         "queued_missions": sum(1 for item in missions.values() if item.get("status") == "queued"),
         "browser": {"available": browser["available"], "controller": browser["controller"]},
+        "system": system_snapshot(),
     }
 
 
@@ -324,6 +357,12 @@ async def capabilities(authorization: Optional[str] = Header(default=None)):
         "background_missions": True,
         "workspace": str(WORKSPACE),
         "browser": browser,
+        "system": system_snapshot(),
+        "queue": {
+            "busy": task_lock.locked(),
+            "queued": sum(1 for item in missions.values() if item.get("status") == "queued"),
+            "running": sum(1 for item in missions.values() if item.get("status") in {"running", "cancelling"}),
+        },
         "limits": {
             "max_turns": MAX_TURNS,
             "task_timeout_seconds": TASK_TIMEOUT,
