@@ -43,6 +43,7 @@ class TaskRequest(BaseModel):
     prompt: str = Field(min_length=1, max_length=8000)
     mode: Literal["read", "workspace"] = "read"
     web: bool = False
+    chat_id: Optional[str] = Field(default=None, max_length=128)
 
 
 class MissionRequest(TaskRequest):
@@ -227,12 +228,17 @@ async def execute(req: TaskRequest, wait_for_slot: bool = False, mission_id: Opt
         active_task = {
             "id": task_id,
             "kind": "mission" if mission_id else "chat",
+            "chat_id": req.chat_id,
             "prompt": req.prompt[:240],
             "mode": req.mode,
             "web": req.web,
+            "stage": "starting",
             "started_at": now_iso(),
+            "model": os.environ.get("GOOSE_MODEL", "openrouter/free"),
         }
         try:
+            if active_task and active_task.get("id") == task_id:
+                active_task["stage"] = "goose_running"
             proc = await asyncio.create_subprocess_exec(
                 *goose_command(full_prompt),
                 cwd=str(WORKSPACE),
@@ -329,6 +335,7 @@ async def mission_worker():
             prompt=mission["prompt"],
             mode=mission["mode"],
             web=bool(mission.get("web")),
+            chat_id=None,
         )
 
         try:
@@ -407,11 +414,19 @@ async def capabilities(authorization: Optional[str] = Header(default=None)):
 @app.get("/agent/status")
 async def agent_status(authorization: Optional[str] = Header(default=None)):
     require_auth(authorization)
+    snapshot = dict(active_task) if active_task else None
+    if snapshot and snapshot.get("started_at"):
+        try:
+            started = datetime.fromisoformat(str(snapshot["started_at"]))
+            snapshot["elapsed_seconds"] = max(0, int((datetime.now(timezone.utc) - started).total_seconds()))
+        except Exception:
+            pass
     return {
         "ok": True,
         "busy": task_lock.locked(),
-        "active": active_task,
+        "active": snapshot,
         "queued_missions": sum(1 for item in missions.values() if item.get("status") == "queued"),
+        "model": os.environ.get("GOOSE_MODEL", "openrouter/free"),
     }
 
 
