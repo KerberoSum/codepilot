@@ -471,6 +471,7 @@ export default {
         const prompt = String(body?.prompt || "").trim();
         const mode = String(body?.mode || "read");
         const web = body?.web === true;
+        const chatId = String(body?.chatId || "").trim().slice(0, 128);
         if (!prompt) return json({ success: false, error: "Task prompt is required." }, 400);
         if (mode !== "read" && mode !== "workspace") {
           return json({ success: false, error: "Unsupported VM Agent mode." }, 400);
@@ -486,7 +487,7 @@ export default {
           let vmResponse = await fetch(vmBase + "/agent/task/stream", {
             method: "POST",
             headers: commonHeaders,
-            body: JSON.stringify({ prompt, mode, web }),
+            body: JSON.stringify({ prompt, mode, web, chat_id: chatId || null }),
             signal: AbortSignal.timeout(300000)
           });
 
@@ -494,7 +495,7 @@ export default {
             vmResponse = await fetch(vmBase + "/agent/task", {
               method: "POST",
               headers: commonHeaders,
-              body: JSON.stringify({ prompt, mode, web }),
+              body: JSON.stringify({ prompt, mode, web, chat_id: chatId || null }),
               signal: AbortSignal.timeout(300000)
             });
           }
@@ -568,6 +569,9 @@ export default {
         const web =
           body?.web === true;
 
+        const chatId =
+          String(body?.chatId || "").trim().slice(0, 128);
+
         if (!prompt) {
           return json({
             success: false,
@@ -612,7 +616,8 @@ export default {
                   JSON.stringify({
                     prompt,
                     mode,
-                    web
+                    web,
+                    chat_id: chatId || null
                   }),
                 signal:
                   AbortSignal.timeout(300000)
