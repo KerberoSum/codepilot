@@ -28,6 +28,9 @@ task_lock = asyncio.Lock()
 mission_queue: asyncio.Queue = asyncio.Queue()
 missions: Dict[str, dict] = {}
 active_processes: Dict[str, asyncio.subprocess.Process] = {}
+active_task: Optional[dict] = None
+active_task_process: Optional[asyncio.subprocess.Process] = None
+cancelled_task_ids = set()
 
 if not SECRET:
     raise RuntimeError("CODEPILOT_AGENT_SECRET is required")
@@ -44,6 +47,11 @@ class TaskRequest(BaseModel):
 
 class MissionRequest(TaskRequest):
     title: Optional[str] = Field(default=None, max_length=120)
+
+
+class TerminalRequest(BaseModel):
+    command: str = Field(min_length=1, max_length=6000)
+    cwd: Optional[str] = Field(default=None, max_length=1200)
 
 
 def now_iso() -> str:
@@ -207,12 +215,23 @@ def normalize(payload: dict) -> dict:
 
 
 async def execute(req: TaskRequest, wait_for_slot: bool = False, mission_id: Optional[str] = None) -> dict:
+    global active_task, active_task_process
+
     if task_lock.locked() and not wait_for_slot:
         raise HTTPException(status_code=429, detail="Remote Worker is busy with another task")
 
     async with task_lock:
+        task_id = mission_id or uuid.uuid4().hex[:12]
         full_prompt = policy_prompt(req)
         proc = None
+        active_task = {
+            "id": task_id,
+            "kind": "mission" if mission_id else "chat",
+            "prompt": req.prompt[:240],
+            "mode": req.mode,
+            "web": req.web,
+            "started_at": now_iso(),
+        }
         try:
             proc = await asyncio.create_subprocess_exec(
                 *goose_command(full_prompt),
@@ -221,6 +240,7 @@ async def execute(req: TaskRequest, wait_for_slot: bool = False, mission_id: Opt
                 stderr=asyncio.subprocess.PIPE,
                 env=os.environ.copy(),
             )
+            active_task_process = proc
             if mission_id:
                 active_processes[mission_id] = proc
             stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=TASK_TIMEOUT)
@@ -234,6 +254,13 @@ async def execute(req: TaskRequest, wait_for_slot: bool = False, mission_id: Opt
         finally:
             if mission_id:
                 active_processes.pop(mission_id, None)
+            active_task_process = None
+            if active_task and active_task.get("id") == task_id:
+                active_task = None
+
+        if task_id in cancelled_task_ids:
+            cancelled_task_ids.discard(task_id)
+            raise HTTPException(status_code=409, detail="Remote Worker task cancelled")
 
         if mission_id and missions.get(mission_id, {}).get("status") == "cancelling":
             raise HTTPException(status_code=409, detail="Mission cancelled")
@@ -249,7 +276,6 @@ async def execute(req: TaskRequest, wait_for_slot: bool = False, mission_id: Opt
             raise HTTPException(status_code=502, detail="Goose returned invalid JSON" + (": " + preview if preview else ""))
 
         return normalize(payload)
-
 
 def public_mission(mission: dict) -> dict:
     allowed = {
@@ -360,11 +386,13 @@ async def capabilities(authorization: Optional[str] = Header(default=None)):
         "remote_worker": True,
         "chat": True,
         "background_missions": True,
+        "terminal": True,
         "workspace": str(WORKSPACE),
         "browser": browser,
         "system": system_snapshot(),
         "queue": {
             "busy": task_lock.locked(),
+            "active": active_task,
             "queued": sum(1 for item in missions.values() if item.get("status") == "queued"),
             "running": sum(1 for item in missions.values() if item.get("status") in {"running", "cancelling"}),
         },
@@ -373,6 +401,116 @@ async def capabilities(authorization: Optional[str] = Header(default=None)):
             "task_timeout_seconds": TASK_TIMEOUT,
             "concurrency": 1,
         },
+    }
+
+
+@app.get("/agent/status")
+async def agent_status(authorization: Optional[str] = Header(default=None)):
+    require_auth(authorization)
+    return {
+        "ok": True,
+        "busy": task_lock.locked(),
+        "active": active_task,
+        "queued_missions": sum(1 for item in missions.values() if item.get("status") == "queued"),
+    }
+
+
+@app.delete("/agent/task/current")
+async def cancel_current_task(authorization: Optional[str] = Header(default=None)):
+    require_auth(authorization)
+    global active_task_process
+    if not active_task or not active_task_process:
+        return {"ok": True, "cancelled": False, "message": "No active Remote Worker task."}
+    task_id = str(active_task.get("id") or "")
+    if task_id:
+        cancelled_task_ids.add(task_id)
+    try:
+        active_task_process.kill()
+    except Exception:
+        pass
+    return {"ok": True, "cancelled": True, "task": active_task}
+
+
+@app.post("/agent/terminal")
+async def terminal(req: TerminalRequest, authorization: Optional[str] = Header(default=None)):
+    require_auth(authorization)
+
+    try:
+        cwd = Path(req.cwd or str(WORKSPACE)).expanduser().resolve()
+    except Exception:
+        cwd = WORKSPACE
+    if not cwd.exists() or not cwd.is_dir():
+        cwd = WORKSPACE
+
+    marker = "__CODEPILOT_TERM_" + uuid.uuid4().hex + "__"
+    script = (
+        req.command
+        + "\n__cp_rc=$?\nprintf '\\n"
+        + marker
+        + "RC=%s\\n' \"$__cp_rc\"\nprintf '"
+        + marker
+        + "CWD='\npwd\n"
+    )
+
+    env = os.environ.copy()
+    env["TERM"] = "dumb"
+    env["PAGER"] = "cat"
+    env["GIT_PAGER"] = "cat"
+
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            "/bin/bash",
+            "-lc",
+            script,
+            cwd=str(cwd),
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.STDOUT,
+            env=env,
+        )
+        stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=45)
+    except asyncio.TimeoutError:
+        try:
+            proc.kill()
+        except Exception:
+            pass
+        raise HTTPException(status_code=504, detail="Terminal command timed out after 45 seconds")
+
+    text = stdout.decode("utf-8", "replace")
+    rc_marker = marker + "RC="
+    cwd_marker = marker + "CWD="
+    rc = proc.returncode
+    next_cwd = str(cwd)
+
+    if rc_marker in text:
+        before, after = text.rsplit(rc_marker, 1)
+        rc_line, _, tail = after.partition("\n")
+        try:
+            rc = int(rc_line.strip())
+        except Exception:
+            pass
+        text = before + tail
+
+    if cwd_marker in text:
+        before, after = text.rsplit(cwd_marker, 1)
+        cwd_line, _, tail = after.partition("\n")
+        candidate = cwd_line.strip()
+        try:
+            resolved = Path(candidate).resolve()
+            if resolved.exists() and resolved.is_dir():
+                next_cwd = str(resolved)
+        except Exception:
+            pass
+        text = before + tail
+
+    if len(text) > 120000:
+        text = "[output truncated]\n" + text[-120000:]
+
+    return {
+        "ok": True,
+        "output": text.rstrip("\n"),
+        "cwd": next_cwd,
+        "exit_code": rc,
+        "user": "codepilot-agent",
     }
 
 
