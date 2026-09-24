@@ -883,7 +883,7 @@ async function runVmAgentTask(){
       if(r.status===401){clearAuthToken();showLogin();throw new Error("Your CodePilot session expired. Please sign in again.")}
       if(!r.ok){
         const d=await r.json().catch(()=>({}));
-        throw new Error(d.error||("HTTP "+r.status));
+        const err=new Error(d.error||("HTTP "+r.status));err.noFallback=true;throw err;
       }
       const ct=r.headers.get("content-type")||"";
       if(!ct.includes("text/event-stream")||!r.body)throw new Error("Streaming connection was unavailable.");
@@ -897,13 +897,14 @@ async function runVmAgentTask(){
             const stage=data.stage||data.status||data.message||"working";
             meta.textContent="Status: "+stage+" · "+((performance.now()-started)/1000).toFixed(1)+" s";
           }else if(event==="result"){
-            if(data.ok===false||data.error)throw new Error(data.error||"VM Agent task failed.");
+            if(data.ok===false||data.error){const err=new Error(data.error||"VM Agent task failed.");err.noFallback=true;throw err;}
             finalData=data;
           }
         });
       }
       if(!finalData)throw new Error("The stream ended before the VM Agent returned a response.");
     }catch(e){
+      if(e?.noFallback)throw e;
       streamFailure=e;
       meta.textContent="Stream interrupted — retrying normally…";
       finalData=await vmAgentPostJson(fullPrompt,mode);
