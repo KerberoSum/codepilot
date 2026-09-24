@@ -49,17 +49,13 @@ The systemd service runs as the dedicated `codepilot-agent` user with:
 - API: `127.0.0.1:8765`
 - environment file: `/etc/codepilot-agent.env`
 
-After pulling this version, deploy the updated server and unit:
+After pulling this version, the easiest upgrade is one command:
 
 ```bash
-sudo cp ~/codepilot/vm-agent/agent_server.py /srv/codepilot-agent/agent_server.py && sudo cp ~/codepilot/vm-agent/codepilot-agent.service /etc/systemd/system/codepilot-agent.service && sudo systemctl daemon-reload && sudo systemctl restart codepilot-agent
+sudo bash vm-agent/upgrade-v3.sh
 ```
 
-Then verify:
-
-```bash
-curl -s http://127.0.0.1:8765/health
-```
+It installs the v3 server/unit, refreshes the Quick Tunnel helper, installs browser tooling, restarts the services, and prints a local health check. Use `--skip-browser` only if you intentionally do not want Trailblaze installed.
 
 The health response should report version 3.
 
