@@ -9,6 +9,8 @@ User=codepilot-agent
 Group=codepilot-agent
 WorkingDirectory=/srv/codepilot-agent
 EnvironmentFile=/etc/codepilot-agent.env
+Environment=HOME=/srv/codepilot-agent
+Environment=PATH=/srv/codepilot-agent/.trailblaze/bin:/srv/codepilot-agent/.bun/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin
 ExecStart=/usr/bin/python3 -m uvicorn agent_server:app --host 127.0.0.1 --port 8765
 Restart=always
 RestartSec=5
