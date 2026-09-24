@@ -195,6 +195,198 @@ export default {
 
 
       /* =====================================================
+         VM AGENT BRIDGE
+         Authenticated proxy. VM credentials stay in Worker secrets.
+      ===================================================== */
+
+      if (
+        path === "/vm-agent/health" &&
+        request.method === "GET"
+      ) {
+
+        if (!env.VM_AGENT_URL || !env.VM_AGENT_SECRET) {
+          return json({
+            success: false,
+            connected: false,
+            error: "VM Agent is not configured."
+          }, 503);
+        }
+
+        const vmBase =
+          String(env.VM_AGENT_URL)
+            .replace(/\/+$/, "");
+
+        try {
+          const vmResponse =
+            await fetch(
+              vmBase + "/health",
+              {
+                headers: {
+                  "Authorization":
+                    "Bearer " +
+                    env.VM_AGENT_SECRET
+                },
+                signal:
+                  AbortSignal.timeout(8000)
+              }
+            );
+
+          const vmText =
+            await vmResponse.text();
+
+          let vmData = {};
+          try {
+            vmData =
+              vmText
+                ? JSON.parse(vmText)
+                : {};
+          } catch {}
+
+          if (!vmResponse.ok) {
+            return json({
+              success: false,
+              connected: false,
+              error:
+                vmData.detail ||
+                vmData.error ||
+                ("VM Agent HTTP " + vmResponse.status)
+            }, 502);
+          }
+
+          return json({
+            success: true,
+            connected: true,
+            agent: vmData
+          });
+
+        } catch (error) {
+          return json({
+            success: false,
+            connected: false,
+            error:
+              "VM Agent is unreachable: " +
+              (error?.message || String(error))
+          }, 502);
+        }
+
+      }
+
+
+      if (
+        path === "/vm-agent/task" &&
+        request.method === "POST"
+      ) {
+
+        if (!env.VM_AGENT_URL || !env.VM_AGENT_SECRET) {
+          return json({
+            success: false,
+            error: "VM Agent is not configured."
+          }, 503);
+        }
+
+        const body =
+          await safeJSON(request);
+
+        const prompt =
+          String(body?.prompt || "").trim();
+
+        const mode =
+          String(body?.mode || "read");
+
+        if (!prompt) {
+          return json({
+            success: false,
+            error: "Task prompt is required."
+          }, 400);
+        }
+
+        if (
+          mode !== "read" &&
+          mode !== "workspace"
+        ) {
+          return json({
+            success: false,
+            error: "Unsupported VM Agent mode."
+          }, 400);
+        }
+
+        const vmBase =
+          String(env.VM_AGENT_URL)
+            .replace(/\/+$/, "");
+
+        try {
+          const vmResponse =
+            await fetch(
+              vmBase + "/agent/task",
+              {
+                method: "POST",
+                headers: {
+                  "Authorization":
+                    "Bearer " +
+                    env.VM_AGENT_SECRET,
+                  "Content-Type":
+                    "application/json"
+                },
+                body:
+                  JSON.stringify({
+                    prompt,
+                    mode
+                  }),
+                signal:
+                  AbortSignal.timeout(300000)
+              }
+            );
+
+          const vmText =
+            await vmResponse.text();
+
+          let vmData = {};
+          try {
+            vmData =
+              vmText
+                ? JSON.parse(vmText)
+                : {};
+          } catch {
+            return json({
+              success: false,
+              error:
+                "VM Agent returned invalid JSON."
+            }, 502);
+          }
+
+          if (!vmResponse.ok) {
+            const detail =
+              typeof vmData.detail === "string"
+                ? vmData.detail
+                : vmData.detail?.message;
+
+            return json({
+              success: false,
+              error:
+                detail ||
+                vmData.error ||
+                ("VM Agent HTTP " + vmResponse.status)
+            }, 502);
+          }
+
+          return json({
+            success: true,
+            ...vmData
+          });
+
+        } catch (error) {
+          return json({
+            success: false,
+            error:
+              "VM Agent request failed: " +
+              (error?.message || String(error))
+          }, 502);
+        }
+
+      }
+
+
+      /* =====================================================
          OPENROUTER FREE MODELS
          GET /models
       ===================================================== */
