@@ -615,6 +615,7 @@ let chatContext="project";
 let pendingAttachments=[];
 let storageSnapshot=null;
 let vmMissionTimer=null;
+let vmStatusTimer=null;
 let vmChats=[], currentVmChat=null, vmAgentMessages=[];
 let terminalCwd="/srv/codepilot-workspace", terminalHistory=[], terminalHistoryIndex=0;
 const ATTACH_MAX_FILES=5;
@@ -779,6 +780,7 @@ function switchAppPage(page){
   terminal?.classList.toggle("hidden",page!=="terminal");
 
   clearInterval(vmMissionTimer);vmMissionTimer=null;
+  clearInterval(vmStatusTimer);vmStatusTimer=null;
 
   if(page==="agent"){
     renderVmAgentHistory();
@@ -786,7 +788,9 @@ function switchAppPage(page){
     checkVmAgent(false);
     loadVmCapabilities().catch(()=>{});
     loadVmMissions().catch(()=>{});
+    refreshVmTaskStatus().catch(()=>{});
     vmMissionTimer=setInterval(()=>loadVmMissions().catch(()=>{}),8000);
+    vmStatusTimer=setInterval(()=>refreshVmTaskStatus().catch(()=>{}),2000);
     setTimeout(()=>document.getElementById("vmAgentTask")?.focus(),30);
   }else if(page==="terminal"){
     checkVmAgent(false);
@@ -851,6 +855,7 @@ async function openVmChat(id){
       document.getElementById("vmAgentWeb").checked=!!Number(currentVmChat.web);
     }
     renderVmChatSelect();renderVmAgentConversation();
+    refreshVmTaskStatus().catch(()=>{});
   }catch(e){
     document.getElementById("vmAgentMeta").textContent="Could not open VM chat · "+(e.message||e);
   }
@@ -1025,12 +1030,12 @@ function parseSseChunk(buffer,onEvent){
   return buffer;
 }
 
-async function vmAgentPostJson(prompt,mode,web=false){
+async function vmAgentPostJson(prompt,mode,web=false,chatId=""){
   return await api("/vm-agent/task",{
     method:"POST",
     headers:{"Content-Type":"application/json"},
     signal:AbortSignal.timeout(305000),
-    body:JSON.stringify({prompt,mode,web})
+    body:JSON.stringify({prompt,mode,web,chatId})
   });
 }
 
@@ -1064,7 +1069,7 @@ async function runVmAgentTask(){
       if(authToken)headers.set("Authorization","Bearer "+authToken);
       const r=await fetch(API_BASE_URL+"/vm-agent/task/stream",{
         method:"POST",headers,signal:AbortSignal.timeout(305000),
-        body:JSON.stringify({prompt:fullPrompt,mode,web})
+        body:JSON.stringify({prompt:fullPrompt,mode,web,chatId:currentVmChat?.id||""})
       });
       if(r.status===401){clearAuthToken();showLogin();throw new Error("Your CodePilot session expired. Please sign in again.")}
       if(!r.ok){
@@ -1093,7 +1098,7 @@ async function runVmAgentTask(){
       if(e?.noFallback)throw e;
       streamFailure=e;
       meta.textContent="Stream interrupted — retrying normally…";
-      finalData=await vmAgentPostJson(fullPrompt,mode,web);
+      finalData=await vmAgentPostJson(fullPrompt,mode,web,currentVmChat?.id||"");
     }
 
     if(finalData?.ok===false||finalData?.error)throw new Error(finalData.error||"VM Agent task failed.");
@@ -1101,6 +1106,7 @@ async function runVmAgentTask(){
     if(!result)throw new Error("The VM Agent completed the request but returned an empty response.");
 
     pending?.remove();
+    removeRecoveredVmPending();
     const savedAssistant=await saveVmChatMessage("assistant",result,mode,web,false);
     vmAgentMessages.push({
       id:savedAssistant?.id||null,role:"assistant",text:result,at:savedAssistant?.created_at||Date.now(),mode,web,error:false
@@ -1114,6 +1120,7 @@ async function runVmAgentTask(){
     addVmAgentHistory({at:new Date().toISOString(),prompt,mode,web,result,tokens:t.total??null});
   }catch(e){
     pending?.remove();
+    removeRecoveredVmPending();
     const message=e?.message||String(e);
     const text="I couldn't complete that request. "+message;
     if(currentVmChat){
@@ -1132,6 +1139,7 @@ async function runVmAgentTask(){
     checkVmAgent(false);
   }finally{
     button.disabled=false;
+    refreshVmTaskStatus().catch(()=>{});
     input.focus();
   }
 }
@@ -1144,6 +1152,74 @@ async function stopVmCurrentTask(){
   }catch(e){meta.textContent="Stop failed · "+(e.message||e)}
 }
 
+
+function vmTaskElapsed(active){
+  if(Number.isFinite(Number(active?.elapsed_seconds)))return Math.max(0,Number(active.elapsed_seconds));
+  if(!active?.started_at)return 0;
+  const started=Date.parse(active.started_at);
+  return Number.isFinite(started)?Math.max(0,Math.floor((Date.now()-started)/1000)):0;
+}
+
+function formatVmTaskElapsed(seconds){
+  const s=Math.max(0,Math.floor(Number(seconds)||0));
+  if(s<60)return s+"s";
+  const m=Math.floor(s/60),r=s%60;
+  return m+"m "+String(r).padStart(2,"0")+"s";
+}
+
+function removeRecoveredVmPending(){
+  document.getElementById("vmAgentRecoveredPending")?.remove();
+}
+
+function ensureRecoveredVmPending(active){
+  if(!active||active.kind!=="chat"||!currentVmChat||active.chat_id!==currentVmChat.id){
+    removeRecoveredVmPending();return;
+  }
+  if(document.getElementById("vmAgentPending")||document.getElementById("vmAgentRecoveredPending"))return;
+  appendVmAgentMessage(
+    "assistant",
+    active.web?"Working on this request and browsing the web…":"Working on this request…",
+    {pending:true,id:"vmAgentRecoveredPending"}
+  );
+}
+
+async function refreshVmTaskStatus(){
+  const meta=document.getElementById("vmAgentMeta");
+  const queue=document.getElementById("workerQueue");
+  const stop=document.getElementById("vmStopTaskButton");
+  try{
+    const d=await api("/vm-agent/status",{signal:AbortSignal.timeout(10000)});
+    const active=d.active||null;
+    if(stop)stop.disabled=!active;
+    if(queue)queue.textContent=active?("1 "+(active.kind||"task")+" · "+(d.queued_missions||0)+" wait"):("0 run · "+(d.queued_missions||0)+" wait");
+
+    if(active){
+      ensureRecoveredVmPending(active);
+      const elapsed=formatVmTaskElapsed(vmTaskElapsed(active));
+      const model=active.model||d.model||"";
+      const stage=active.stage==="goose_running"?"working":(active.stage||"running");
+      const owner=active.kind==="mission"?"Mission":"Chat";
+      const web=active.web?" · web":"";
+      const modelText=model?" · "+model:"";
+      if(meta){
+        if(active.kind==="chat"&&active.chat_id&&currentVmChat&&active.chat_id!==currentVmChat.id){
+          meta.textContent="Remote Worker busy in another chat · "+elapsed+web+modelText;
+        }else{
+          meta.textContent=owner+" "+stage+" · "+elapsed+web+modelText;
+        }
+      }
+      setVmAgentStatus("online","Working · "+elapsed);
+    }else{
+      removeRecoveredVmPending();
+      if(meta&&/^(Chat|Mission|Remote Worker busy)/.test(meta.textContent||""))meta.textContent="Ready";
+      setVmAgentStatus("online","Connected");
+    }
+    return d;
+  }catch(e){
+    if(meta)meta.textContent="Status refresh failed · "+(e.message||e);
+    return null;
+  }
+}
 
 function formatWorkerBytes(value){
   const n=Number(value||0);if(!n)return "—";
