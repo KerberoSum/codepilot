@@ -214,17 +214,21 @@ export default {
 
         const vmBase =
           String(env.VM_AGENT_URL)
+            .trim()
             .replace(/\/+$/, "");
+
+        const vmHealthUrl =
+          vmBase + "/health";
 
         try {
           const vmResponse =
             await fetch(
-              vmBase + "/health",
+              vmHealthUrl,
               {
                 headers: {
                   "Authorization":
                     "Bearer " +
-                    env.VM_AGENT_SECRET
+                    String(env.VM_AGENT_SECRET).trim()
                 },
                 signal:
                   AbortSignal.timeout(8000)
@@ -249,14 +253,30 @@ export default {
               error:
                 vmData.detail ||
                 vmData.error ||
-                ("VM Agent HTTP " + vmResponse.status)
+                ("VM Agent HTTP " + vmResponse.status),
+              diagnostic: {
+                target:
+                  vmHealthUrl.replace(/^https?:\/\//, ""),
+                status:
+                  vmResponse.status,
+                contentType:
+                  vmResponse.headers.get("content-type") || "",
+                responsePreview:
+                  vmText.slice(0, 180)
+              }
             }, 502);
           }
 
           return json({
             success: true,
             connected: true,
-            agent: vmData
+            agent: vmData,
+            diagnostic: {
+              target:
+                vmHealthUrl.replace(/^https?:\/\//, ""),
+              status:
+                vmResponse.status
+            }
           });
 
         } catch (error) {
@@ -265,7 +285,11 @@ export default {
             connected: false,
             error:
               "VM Agent is unreachable: " +
-              (error?.message || String(error))
+              (error?.message || String(error)),
+            diagnostic: {
+              target:
+                vmHealthUrl.replace(/^https?:\/\//, "")
+            }
           }, 502);
         }
 
@@ -312,6 +336,7 @@ export default {
 
         const vmBase =
           String(env.VM_AGENT_URL)
+            .trim()
             .replace(/\/+$/, "");
 
         try {
@@ -323,7 +348,7 @@ export default {
                 headers: {
                   "Authorization":
                     "Bearer " +
-                    env.VM_AGENT_SECRET,
+                    String(env.VM_AGENT_SECRET).trim(),
                   "Content-Type":
                     "application/json"
                 },
