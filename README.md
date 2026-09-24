@@ -2,7 +2,7 @@
 
 CodePilot has two separately deployed parts:
 
-- `frontend/` is the static browser application deployed by Netlify.
+- `frontend/` is the static browser application (currently served through GitHub Pages).
 - `worker/` is the API deployed to Cloudflare Workers and connected to D1.
 
 ## Before deploying
@@ -17,17 +17,11 @@ CodePilot has two separately deployed parts:
    - `VM_MODEL_GATEWAY_SECRET` — separate secret for the VM-to-CodePilot OpenAI-compatible model gateway.
    The frontend never receives these VM secrets; authenticated browser requests are proxied through the Worker.
 
-Remote Worker v3 files live in `vm-agent/`. They add conversational VM chat, background Missions, lightweight VM resource status, optional headless web/browser control through Trailblaze, automatic Quick Tunnel registration, a hardened service template, and the CodePilot model gateway. See `vm-agent/README.md` for the VM upgrade and browser-tool installation steps.
+Remote Worker v3.1 files live in `vm-agent/`. They add conversational VM chat, background Missions, lightweight VM resource status, optional headless web/browser control through Trailblaze, automatic Quick Tunnel registration, a hardened service template, and the CodePilot model gateway. See `vm-agent/README.md` for the VM upgrade and browser-tool installation steps.
 
-## Netlify settings
+## Frontend hosting
 
-Import this private GitHub repository and use:
-
-- Production branch: `main`
-- Build command: leave blank
-- Publish directory: `frontend`
-
-The included `netlify.toml` also sets the publish directory automatically.
+The frontend is static and can be served directly from GitHub Pages or another static host. The current CodePilot deployment uses GitHub Pages, so frontend commits do not consume Netlify build credits.
 
 ## Cloudflare setup
 
