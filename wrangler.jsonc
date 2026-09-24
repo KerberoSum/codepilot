@@ -7,7 +7,7 @@
     {
       "binding": "DB",
       "database_name": "codepilot-db",
-      "database_id": "REPLACE_WITH_YOUR_D1_DATABASE_ID",
+      "database_id": "ed1a073d-42e8-40a7-b9ef-c653f2712220",
       "migrations_dir": "migrations"
     }
   ]
