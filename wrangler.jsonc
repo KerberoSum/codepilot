@@ -3,11 +3,12 @@
   "name": "aged-dawn-44a4",
   "main": "worker/src/index.js",
   "compatibility_date": "2026-09-07",
+  "keep_vars": true,
   "d1_databases": [
     {
       "binding": "DB",
       "database_name": "codepilot-db",
-      "database_id": "ed1a073d-42e8-40a7-b9ef-c653f2712220",
+      "database_id": "ed1a073d-42e8-40a7-bcef-c65372712220",
       "migrations_dir": "migrations"
     }
   ]
