@@ -386,6 +386,89 @@ export default {
 
 
       if (
+        path === "/vm-agent/task/stream" &&
+        request.method === "POST"
+      ) {
+        if (!env.VM_AGENT_SECRET) {
+          return json({ success: false, error: "VM Agent secret is not configured." }, 503);
+        }
+        const body = await safeJSON(request);
+        const prompt = String(body?.prompt || "").trim();
+        const mode = String(body?.mode || "read");
+        if (!prompt) return json({ success: false, error: "Task prompt is required." }, 400);
+        if (mode !== "read" && mode !== "workspace") {
+          return json({ success: false, error: "Unsupported VM Agent mode." }, 400);
+        }
+        const vmBase = await getVmAgentBase();
+        if (!vmBase) return json({ success: false, error: "VM Agent URL is not configured or registered." }, 503);
+
+        const commonHeaders = {
+          "Authorization": "Bearer " + String(env.VM_AGENT_SECRET).trim(),
+          "Content-Type": "application/json"
+        };
+        try {
+          let vmResponse = await fetch(vmBase + "/agent/task/stream", {
+            method: "POST",
+            headers: commonHeaders,
+            body: JSON.stringify({ prompt, mode }),
+            signal: AbortSignal.timeout(300000)
+          });
+
+          if (vmResponse.status === 404 || vmResponse.status === 405) {
+            vmResponse = await fetch(vmBase + "/agent/task", {
+              method: "POST",
+              headers: commonHeaders,
+              body: JSON.stringify({ prompt, mode }),
+              signal: AbortSignal.timeout(300000)
+            });
+          }
+
+          if (!vmResponse.ok) {
+            const text = await vmResponse.text();
+            let data = {};
+            try { data = text ? JSON.parse(text) : {}; } catch {}
+            return json({
+              success: false,
+              error: data.detail || data.error || ("VM Agent HTTP " + vmResponse.status)
+            }, 502);
+          }
+
+          const contentType = vmResponse.headers.get("content-type") || "";
+          if (contentType.includes("text/event-stream")) {
+            return new Response(vmResponse.body, {
+              status: 200,
+              headers: {
+                ...corsHeaders,
+                "Content-Type": "text/event-stream",
+                "Cache-Control": "no-store",
+                "Connection": "keep-alive"
+              }
+            });
+          }
+
+          const data = await vmResponse.json();
+          const encoder = new TextEncoder();
+          const payload =
+            "event: status\ndata: " + JSON.stringify({ stage: "completed" }) + "\n\n" +
+            "event: result\ndata: " + JSON.stringify(data) + "\n\n";
+          return new Response(encoder.encode(payload), {
+            status: 200,
+            headers: {
+              ...corsHeaders,
+              "Content-Type": "text/event-stream",
+              "Cache-Control": "no-store"
+            }
+          });
+        } catch (error) {
+          return json({
+            success: false,
+            error: "VM Agent stream request failed: " + (error?.message || String(error))
+          }, 502);
+        }
+      }
+
+
+      if (
         path === "/vm-agent/task" &&
         request.method === "POST"
       ) {
