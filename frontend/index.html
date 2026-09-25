@@ -1317,9 +1317,17 @@ async function loadVmCapabilities(){
     if(worker){worker.textContent=d.remote_worker?"Ready":"Unavailable";worker.className=d.remote_worker?"ready":"offline";}
     const b=d.browser||{},s=d.system||{},q=d.queue||{};
     if(browser){
-      browser.textContent=b.available?(b.controller||"Ready"):(b.chromium_detected?"Setup needed":"Not installed");
-      browser.className=b.available?"ready":"warn";
-      browser.title=b.available?"Interactive headless web control is available.":"Install VM browser tools to enable interactive browsing.";
+      if(b.available){
+        browser.textContent=(b.controller||"Ready")+(b.daemon_ready?" · warm":" · cold");
+        browser.className=b.daemon_ready?"ready":"warn";
+        browser.title=b.daemon_ready
+          ?"Interactive web controller is already running."
+          :"Browser tools are installed; the first web task may take longer while Trailblaze starts.";
+      }else{
+        browser.textContent=b.chromium_detected?"Setup needed":"Not installed";
+        browser.className="warn";
+        browser.title="Install VM browser tools to enable interactive browsing.";
+      }
     }
     const cpu=document.getElementById("workerCpu"),ram=document.getElementById("workerRam"),disk=document.getElementById("workerDisk"),queue=document.getElementById("workerQueue");
     if(cpu)cpu.textContent=(s.cpu_count||"—")+"c · "+(s.load_1m??"—");
