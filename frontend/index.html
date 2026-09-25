@@ -616,6 +616,7 @@ let pendingAttachments=[];
 let storageSnapshot=null;
 let vmMissionTimer=null;
 let vmStatusTimer=null;
+let vmActivePage="workspace";
 let vmChats=[], currentVmChat=null, vmAgentMessages=[];
 let terminalCwd="/srv/codepilot-workspace", terminalHistory=[], terminalHistoryIndex=0;
 const ATTACH_MAX_FILES=5;
@@ -774,23 +775,46 @@ async function checkVmAgent(showError=false){
   }
 }
 
+function scheduleVmStatusPoll(delay=15000){
+  clearTimeout(vmStatusTimer);vmStatusTimer=null;
+  if(vmActivePage!=="agent")return;
+  vmStatusTimer=setTimeout(async()=>{
+    if(vmActivePage!=="agent")return;
+    const d=await refreshVmTaskStatus().catch(()=>null);
+    if(vmActivePage==="agent")scheduleVmStatusPoll(d?.active?3000:15000);
+  },delay);
+}
+
+function scheduleVmMissionPoll(delay=20000){
+  clearTimeout(vmMissionTimer);vmMissionTimer=null;
+  if(vmActivePage!=="agent")return;
+  vmMissionTimer=setTimeout(async()=>{
+    if(vmActivePage!=="agent")return;
+    const items=await loadVmMissions().catch(()=>[]);
+    const busy=Array.isArray(items)&&items.some(m=>["queued","running","cancelling"].includes(m.status));
+    if(vmActivePage==="agent")scheduleVmMissionPoll(busy?8000:20000);
+  },delay);
+}
+
 function switchAppPage(page){
+  vmActivePage=page;
   const agent=document.getElementById("agentPage"),terminal=document.getElementById("terminalPage");
   agent?.classList.toggle("hidden",page!=="agent");
   terminal?.classList.toggle("hidden",page!=="terminal");
 
-  clearInterval(vmMissionTimer);vmMissionTimer=null;
-  clearInterval(vmStatusTimer);vmStatusTimer=null;
+  clearTimeout(vmMissionTimer);vmMissionTimer=null;
+  clearTimeout(vmStatusTimer);vmStatusTimer=null;
 
   if(page==="agent"){
     renderVmAgentHistory();
     if(!currentVmChat&&vmChats.length)openVmChat(vmChats[0].id);else renderVmAgentConversation();
     checkVmAgent(false);
     loadVmCapabilities().catch(()=>{});
-    loadVmMissions().catch(()=>{});
-    refreshVmTaskStatus().catch(()=>{});
-    vmMissionTimer=setInterval(()=>loadVmMissions().catch(()=>{}),8000);
-    vmStatusTimer=setInterval(()=>refreshVmTaskStatus().catch(()=>{}),2000);
+    loadVmMissions().then(items=>{
+      const busy=Array.isArray(items)&&items.some(m=>["queued","running","cancelling"].includes(m.status));
+      scheduleVmMissionPoll(busy?8000:20000);
+    }).catch(()=>scheduleVmMissionPoll(20000));
+    refreshVmTaskStatus().then(d=>scheduleVmStatusPoll(d?.active?3000:15000)).catch(()=>scheduleVmStatusPoll(15000));
     setTimeout(()=>document.getElementById("vmAgentTask")?.focus(),30);
   }else if(page==="terminal"){
     checkVmAgent(false);
@@ -1289,7 +1313,9 @@ function renderVmMissions(items){
 
 async function loadVmMissions(){
   const d=await api("/vm-agent/missions",{signal:AbortSignal.timeout(12000)});
-  renderVmMissions(Array.isArray(d.missions)?d.missions:[]);
+  const items=Array.isArray(d.missions)?d.missions:[];
+  renderVmMissions(items);
+  return items;
 }
 
 async function queueVmMission(){
