@@ -3,6 +3,7 @@ import json
 import os
 import secrets
 import shutil
+import socket
 import subprocess
 import time
 import uuid
@@ -19,6 +20,7 @@ app = FastAPI(title="CodePilot Remote Worker", version="3.2")
 SECRET = os.environ.get("CODEPILOT_AGENT_SECRET", "")
 GOOSE_BIN = os.environ.get("GOOSE_BIN", "/usr/local/bin/goose")
 TRAILBLAZE_BIN = os.environ.get("TRAILBLAZE_BIN", "trailblaze")
+TRAILBLAZE_PORT = int(os.environ.get("TRAILBLAZE_PORT", "52525"))
 WORKSPACE = Path(os.environ.get("CODEPILOT_WORKSPACE", "/srv/codepilot-workspace")).resolve()
 STATE_FILE = Path(os.environ.get("CODEPILOT_MISSION_STATE", "/srv/codepilot-agent/missions.json")).resolve()
 MAX_TURNS = int(os.environ.get("CODEPILOT_MAX_TURNS", "12"))
@@ -74,6 +76,14 @@ def command_path(command: str) -> Optional[str]:
     return shutil.which(command)
 
 
+def tcp_ready(host: str, port: int, timeout: float = 0.15) -> bool:
+    try:
+        with socket.create_connection((host, port), timeout=timeout):
+            return True
+    except OSError:
+        return False
+
+
 def browser_capability() -> dict:
     trailblaze = command_path(TRAILBLAZE_BIN)
     chromium = (
@@ -93,6 +103,8 @@ def browser_capability() -> dict:
         "chromium_detected": bool(chromium),
         "chromium_path": chromium,
         "headless": True,
+        "daemon_ready": tcp_ready("127.0.0.1", TRAILBLAZE_PORT) if trailblaze else False,
+        "daemon_port": TRAILBLAZE_PORT if trailblaze else None,
     }
 
 
