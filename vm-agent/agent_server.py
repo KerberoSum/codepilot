@@ -4,6 +4,7 @@ import os
 import secrets
 import shutil
 import subprocess
+import time
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
@@ -30,6 +31,7 @@ missions: Dict[str, dict] = {}
 active_processes: Dict[str, asyncio.subprocess.Process] = {}
 active_task: Optional[dict] = None
 active_task_process: Optional[asyncio.subprocess.Process] = None
+last_run: Optional[dict] = None
 cancelled_task_ids = set()
 
 if not SECRET:
@@ -199,11 +201,25 @@ def extract_result(payload: dict) -> str:
     return text if isinstance(text, str) and text.strip() else ""
 
 
+def extract_inference(payload: dict) -> dict:
+    messages = payload.get("messages")
+    if isinstance(messages, list):
+        for msg in reversed(messages):
+            if not isinstance(msg, dict) or msg.get("role") != "assistant":
+                continue
+            metadata = msg.get("metadata")
+            if isinstance(metadata, dict) and isinstance(metadata.get("inference"), dict):
+                return metadata["inference"]
+    return {}
+
+
 def normalize(payload: dict) -> dict:
-    usage = payload.get("usage") or {}
-    total = usage.get("total_tokens", payload.get("total_tokens"))
-    inp = usage.get("input_tokens", payload.get("input_tokens"))
-    out = usage.get("output_tokens", payload.get("output_tokens"))
+    metadata = payload.get("metadata") if isinstance(payload.get("metadata"), dict) else {}
+    usage = payload.get("usage") if isinstance(payload.get("usage"), dict) else {}
+    total = usage.get("total_tokens", payload.get("total_tokens", metadata.get("total_tokens")))
+    inp = usage.get("input_tokens", payload.get("input_tokens", metadata.get("input_tokens")))
+    out = usage.get("output_tokens", payload.get("output_tokens", metadata.get("output_tokens")))
+    cost = payload.get("cost_usd", metadata.get("cost_usd"))
     result = extract_result(payload)
     if not result:
         raise HTTPException(status_code=502, detail="Goose completed without a text response")
@@ -211,12 +227,14 @@ def normalize(payload: dict) -> dict:
         "ok": True,
         "result": result,
         "tokens": {"total": total, "input": inp, "output": out},
-        "status": "completed",
+        "cost_usd": cost,
+        "inference": extract_inference(payload),
+        "status": str(metadata.get("status") or payload.get("status") or "completed"),
     }
 
 
 async def execute(req: TaskRequest, wait_for_slot: bool = False, mission_id: Optional[str] = None) -> dict:
-    global active_task, active_task_process
+    global active_task, active_task_process, last_run
 
     if task_lock.locked() and not wait_for_slot:
         raise HTTPException(status_code=429, detail="Remote Worker is busy with another task")
@@ -225,6 +243,8 @@ async def execute(req: TaskRequest, wait_for_slot: bool = False, mission_id: Opt
         task_id = mission_id or uuid.uuid4().hex[:12]
         full_prompt = policy_prompt(req)
         proc = None
+        started_at = now_iso()
+        started_monotonic = time.monotonic()
         active_task = {
             "id": task_id,
             "kind": "mission" if mission_id else "chat",
@@ -233,7 +253,7 @@ async def execute(req: TaskRequest, wait_for_slot: bool = False, mission_id: Opt
             "mode": req.mode,
             "web": req.web,
             "stage": "starting",
-            "started_at": now_iso(),
+            "started_at": started_at,
             "model": os.environ.get("GOOSE_MODEL", "openrouter/free"),
         }
         try:
@@ -256,6 +276,17 @@ async def execute(req: TaskRequest, wait_for_slot: bool = False, mission_id: Opt
                     proc.kill()
                 except Exception:
                     pass
+            last_run = {
+                "id": task_id,
+                "kind": "mission" if mission_id else "chat",
+                "chat_id": req.chat_id,
+                "status": "timed_out",
+                "web": req.web,
+                "model": os.environ.get("GOOSE_MODEL", "openrouter/free"),
+                "started_at": started_at,
+                "completed_at": now_iso(),
+                "duration_seconds": round(time.monotonic() - started_monotonic, 2),
+            }
             raise HTTPException(status_code=504, detail="Remote Worker task timed out")
         finally:
             if mission_id:
@@ -266,6 +297,17 @@ async def execute(req: TaskRequest, wait_for_slot: bool = False, mission_id: Opt
 
         if task_id in cancelled_task_ids:
             cancelled_task_ids.discard(task_id)
+            last_run = {
+                "id": task_id,
+                "kind": "mission" if mission_id else "chat",
+                "chat_id": req.chat_id,
+                "status": "cancelled",
+                "web": req.web,
+                "model": os.environ.get("GOOSE_MODEL", "openrouter/free"),
+                "started_at": started_at,
+                "completed_at": now_iso(),
+                "duration_seconds": round(time.monotonic() - started_monotonic, 2),
+            }
             raise HTTPException(status_code=409, detail="Remote Worker task cancelled")
 
         if mission_id and missions.get(mission_id, {}).get("status") == "cancelling":
@@ -273,20 +315,79 @@ async def execute(req: TaskRequest, wait_for_slot: bool = False, mission_id: Opt
 
         if proc is None or proc.returncode != 0:
             detail = stderr.decode("utf-8", "replace")[-1800:] if proc else "Goose failed to start"
+            last_run = {
+                "id": task_id,
+                "kind": "mission" if mission_id else "chat",
+                "chat_id": req.chat_id,
+                "status": "failed",
+                "web": req.web,
+                "model": os.environ.get("GOOSE_MODEL", "openrouter/free"),
+                "started_at": started_at,
+                "completed_at": now_iso(),
+                "duration_seconds": round(time.monotonic() - started_monotonic, 2),
+                "error": detail or "Goose failed",
+            }
             raise HTTPException(status_code=502, detail=detail or "Goose failed")
 
         try:
             payload = json.loads(stdout.decode("utf-8"))
         except Exception:
             preview = stdout.decode("utf-8", "replace")[-800:]
-            raise HTTPException(status_code=502, detail="Goose returned invalid JSON" + (": " + preview if preview else ""))
+            detail = "Goose returned invalid JSON" + (": " + preview if preview else "")
+            last_run = {
+                "id": task_id,
+                "kind": "mission" if mission_id else "chat",
+                "chat_id": req.chat_id,
+                "status": "failed",
+                "web": req.web,
+                "model": os.environ.get("GOOSE_MODEL", "openrouter/free"),
+                "started_at": started_at,
+                "completed_at": now_iso(),
+                "duration_seconds": round(time.monotonic() - started_monotonic, 2),
+                "error": detail,
+            }
+            raise HTTPException(status_code=502, detail=detail)
 
-        return normalize(payload)
+        try:
+            result = normalize(payload)
+        except HTTPException as exc:
+            last_run = {
+                "id": task_id,
+                "kind": "mission" if mission_id else "chat",
+                "chat_id": req.chat_id,
+                "status": "failed",
+                "web": req.web,
+                "model": os.environ.get("GOOSE_MODEL", "openrouter/free"),
+                "started_at": started_at,
+                "completed_at": now_iso(),
+                "duration_seconds": round(time.monotonic() - started_monotonic, 2),
+                "error": str(exc.detail),
+            }
+            raise
+
+        duration = round(time.monotonic() - started_monotonic, 2)
+        result["duration_seconds"] = duration
+        last_run = {
+            "id": task_id,
+            "kind": "mission" if mission_id else "chat",
+            "chat_id": req.chat_id,
+            "status": "completed",
+            "web": req.web,
+            "model": os.environ.get("GOOSE_MODEL", "openrouter/free"),
+            "started_at": started_at,
+            "completed_at": now_iso(),
+            "duration_seconds": duration,
+            "tokens": result.get("tokens", {}),
+            "cost_usd": result.get("cost_usd"),
+            "inference": result.get("inference", {}),
+        }
+        return result
 
 def public_mission(mission: dict) -> dict:
     allowed = {
         "id", "title", "prompt", "mode", "web", "status", "created_at", "started_at",
-        "completed_at", "updated_at", "result", "error", "tokens"
+        "completed_at", "updated_at", "result", "error", "tokens", "duration_seconds",
+        "cost_usd", "inference"
     }
     return {key: mission.get(key) for key in allowed if key in mission}
 
@@ -347,6 +448,9 @@ async def mission_worker():
                 mission["status"] = "completed"
                 mission["result"] = result.get("result", "")
                 mission["tokens"] = result.get("tokens", {})
+                mission["duration_seconds"] = result.get("duration_seconds")
+                mission["cost_usd"] = result.get("cost_usd")
+                mission["inference"] = result.get("inference", {})
         except HTTPException as exc:
             if mission.get("status") == "cancelling" or str(exc.detail) == "Mission cancelled":
                 mission["status"] = "cancelled"
@@ -427,6 +531,7 @@ async def agent_status(authorization: Optional[str] = Header(default=None)):
         "active": snapshot,
         "queued_missions": sum(1 for item in missions.values() if item.get("status") == "queued"),
         "model": os.environ.get("GOOSE_MODEL", "openrouter/free"),
+        "last_run": last_run,
     }
 
 
