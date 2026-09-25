@@ -37,5 +37,25 @@ echo "Agent:"
 systemctl --no-pager --full status codepilot-agent | sed -n '1,8p'
 echo
 echo "Health:"
-curl -fsS http://127.0.0.1:8765/health || true
+
+HEALTH_URL="http://127.0.0.1:8765/health"
+HEALTH_OK=0
+for attempt in $(seq 1 10); do
+  if HEALTH_JSON="$(curl -fsS --connect-timeout 2 --max-time 5 "$HEALTH_URL" 2>/dev/null)"; then
+    echo "$HEALTH_JSON"
+    HEALTH_OK=1
+    break
+  fi
+  if [ "$attempt" -lt 10 ]; then
+    echo "Waiting for Remote Worker API... ($attempt/10)"
+    sleep 2
+  fi
+done
+
+if [ "$HEALTH_OK" -ne 1 ]; then
+  echo "Remote Worker API did not become healthy after 10 attempts." >&2
+  curl -fsS --connect-timeout 2 --max-time 5 "$HEALTH_URL" >/dev/null
+  exit 1
+fi
+
 echo
