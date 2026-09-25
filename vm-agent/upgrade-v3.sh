@@ -32,7 +32,7 @@ if [ "${1:-}" != "--skip-browser" ]; then
 fi
 
 echo
-echo "CodePilot Remote Worker v3 upgrade complete."
+echo "CodePilot Remote Worker v3.2 upgrade complete."
 echo "Agent:"
 systemctl --no-pager --full status codepilot-agent | sed -n '1,8p'
 echo
