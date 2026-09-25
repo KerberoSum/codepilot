@@ -427,6 +427,14 @@ button,input,textarea,select{font:inherit}button{cursor:pointer}.hidden{display:
         <div class="agent-stat"><span>Queue</span><b id="workerQueue">—</b></div>
       </div>
 
+      <div class="agent-side-title">LAST REMOTE RUN</div>
+      <div class="agent-stat-grid">
+        <div class="agent-stat"><span>Duration</span><b id="workerLastDuration">—</b></div>
+        <div class="agent-stat"><span>Tokens</span><b id="workerLastTokens">—</b></div>
+        <div class="agent-stat"><span>Model</span><b id="workerLastModel">—</b></div>
+        <div class="agent-stat"><span>Cost</span><b id="workerLastCost">—</b></div>
+      </div>
+
       <div class="agent-side-title">QUICK TASKS</div>
       <div class="agent-quick-grid">
         <button class="agent-quick" onclick="setVmAgentPreset('Report CPU load, RAM usage, swap usage, disk usage, and uptime. Flag anything unusual.','read')">System health</button>
@@ -1016,7 +1024,12 @@ function renderVmAgentHistory(){
     const main=document.createElement("div");main.className="storage-item-main";
     const t=document.createElement("div");t.className="vm-agent-history-task";t.textContent=(item.mode||"read")+" · "+(item.prompt||"");
     const r=document.createElement("div");r.className="vm-agent-history-result";r.textContent=item.result||item.error||"";
-    const meta=document.createElement("div");meta.className="storage-item-meta";meta.textContent=new Date(item.at).toLocaleString();
+    const meta=document.createElement("div");meta.className="storage-item-meta";
+    const details=[new Date(item.at).toLocaleString()];
+    if(item.duration!=null)details.push(formatVmTaskElapsed(item.duration));
+    if(item.tokens!=null)details.push(formatTokens(item.tokens)+" tokens");
+    if(item.cost!=null)details.push(formatVmCost(item.cost));
+    meta.textContent=details.join(" · ");
     main.append(t,r,meta);
     const reuse=document.createElement("button");reuse.className="storage-delete";reuse.textContent="Reuse";
     reuse.onclick=()=>{document.getElementById("vmAgentTask").value=item.prompt||"";document.getElementById("vmAgentMode").value=item.mode||"read";document.getElementById("vmAgentTask")?.focus()};
@@ -1138,10 +1151,20 @@ async function runVmAgentTask(){
     renderVmAgentConversation();
     await loadVmChats(false);
 
-    const t=finalData.tokens||{},elapsed=((performance.now()-started)/1000).toFixed(1);
-    meta.textContent="Status: completed · "+elapsed+" s"+(streamFailure?" · recovered after stream retry":"")+(t.total!=null?" · "+formatTokens(t.total)+" tokens":"");
+    const t=finalData.tokens||{};
+    const measured=Number(finalData.duration_seconds);
+    const elapsed=Number.isFinite(measured)?measured:Number(((performance.now()-started)/1000).toFixed(1));
+    const runBits=["Status: completed",formatVmTaskElapsed(elapsed)];
+    if(streamFailure)runBits.push("recovered after stream retry");
+    if(t.total!=null)runBits.push(formatTokens(t.total)+" tokens");
+    if(finalData.cost_usd!=null)runBits.push(formatVmCost(finalData.cost_usd));
+    meta.textContent=runBits.join(" · ");
     setVmAgentStatus("online","Connected");
-    addVmAgentHistory({at:new Date().toISOString(),prompt,mode,web,result,tokens:t.total??null});
+    renderVmLastRun({
+      duration_seconds:elapsed,tokens:t,cost_usd:finalData.cost_usd,
+      inference:finalData.inference||{},model:finalData.inference?.requestedModel||""
+    });
+    addVmAgentHistory({at:new Date().toISOString(),prompt,mode,web,result,tokens:t.total??null,duration:elapsed,cost:finalData.cost_usd??null});
   }catch(e){
     pending?.remove();
     removeRecoveredVmPending();
@@ -1216,6 +1239,7 @@ async function refreshVmTaskStatus(){
     const active=d.active||null;
     if(stop)stop.disabled=!active;
     if(queue)queue.textContent=active?("1 "+(active.kind||"task")+" · "+(d.queued_missions||0)+" wait"):("0 run · "+(d.queued_missions||0)+" wait");
+    renderVmLastRun(d.last_run||null);
 
     if(active){
       ensureRecoveredVmPending(active);
@@ -1245,6 +1269,34 @@ async function refreshVmTaskStatus(){
   }
 }
 
+function formatVmCost(value){
+  const n=Number(value);
+  if(!Number.isFinite(n))return "—";
+  if(n===0)return "$0";
+  if(n<0.01)return "$"+n.toFixed(4);
+  return "$"+n.toFixed(2);
+}
+
+function renderVmLastRun(run){
+  const duration=document.getElementById("workerLastDuration");
+  const tokens=document.getElementById("workerLastTokens");
+  const model=document.getElementById("workerLastModel");
+  const cost=document.getElementById("workerLastCost");
+  if(!run){
+    [duration,tokens,model,cost].forEach(el=>{if(el)el.textContent="—"});
+    return;
+  }
+  const inference=run.inference||{};
+  if(duration)duration.textContent=run.duration_seconds!=null?formatVmTaskElapsed(run.duration_seconds):"—";
+  if(tokens)tokens.textContent=run.tokens?.total!=null?formatTokens(run.tokens.total):"—";
+  if(model){
+    const requested=inference.requestedModel||run.model||"—";
+    model.textContent=requested;
+    model.title=inference.provider?("Provider: "+inference.provider):requested;
+  }
+  if(cost)cost.textContent=formatVmCost(run.cost_usd);
+}
+
 function formatWorkerBytes(value){
   const n=Number(value||0);if(!n)return "—";
   const units=["B","KB","MB","GB","TB"];let x=n,i=0;
@@ -1265,9 +1317,17 @@ async function loadVmCapabilities(){
     if(worker){worker.textContent=d.remote_worker?"Ready":"Unavailable";worker.className=d.remote_worker?"ready":"offline";}
     const b=d.browser||{},s=d.system||{},q=d.queue||{};
     if(browser){
-      browser.textContent=b.available?(b.controller||"Ready"):(b.chromium_detected?"Setup needed":"Not installed");
-      browser.className=b.available?"ready":"warn";
-      browser.title=b.available?"Interactive headless web control is available.":"Install VM browser tools to enable interactive browsing.";
+      if(b.available){
+        browser.textContent=(b.controller||"Ready")+(b.daemon_ready?" · warm":" · cold");
+        browser.className=b.daemon_ready?"ready":"warn";
+        browser.title=b.daemon_ready
+          ?"Interactive web controller is already running."
+          :"Browser tools are installed; the first web task may take longer while Trailblaze starts.";
+      }else{
+        browser.textContent=b.chromium_detected?"Setup needed":"Not installed";
+        browser.className="warn";
+        browser.title="Install VM browser tools to enable interactive browsing.";
+      }
     }
     const cpu=document.getElementById("workerCpu"),ram=document.getElementById("workerRam"),disk=document.getElementById("workerDisk"),queue=document.getElementById("workerQueue");
     if(cpu)cpu.textContent=(s.cpu_count||"—")+"c · "+(s.load_1m??"—");
@@ -1297,7 +1357,10 @@ function renderVmMissions(items){
     const status=document.createElement("span");status.className="agent-mission-status "+(m.status||"");status.textContent=m.status||"unknown";
     top.append(title,status);
     const meta=document.createElement("div");meta.className="agent-mission-meta";
-    meta.textContent=(m.mode||"read")+(m.web?" · web":"")+" · "+missionTime(m.created_at);
+    const runBits=[];
+    if(m.duration_seconds!=null)runBits.push(formatVmTaskElapsed(m.duration_seconds));
+    if(m.tokens?.total!=null)runBits.push(formatTokens(m.tokens.total)+" tokens");
+    meta.textContent=(m.mode||"read")+(m.web?" · web":"")+" · "+missionTime(m.created_at)+(runBits.length?" · "+runBits.join(" · "):"");
     const actions=document.createElement("div");actions.className="agent-mission-actions";
     if(m.result||m.error){
       const view=document.createElement("button");view.className="agent-mission-btn";view.textContent="Open result";
