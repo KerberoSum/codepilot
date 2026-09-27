@@ -19,6 +19,7 @@ install -d -o codepilot-agent -g codepilot-agent "$AGENT_DIR" "$WORKSPACE"
 install -m 0644 "$SCRIPT_DIR/agent_server.py" "$AGENT_DIR/agent_server.py"
 install -m 0644 "$SCRIPT_DIR/codepilot-agent.service" /etc/systemd/system/codepilot-agent.service
 install -m 0755 "$SCRIPT_DIR/quick-tunnel-register.sh" /usr/local/bin/codepilot-quick-tunnel
+bash "$SCRIPT_DIR/install-ai-relays.sh"
 
 systemctl daemon-reload
 systemctl restart codepilot-agent
@@ -32,7 +33,7 @@ if [ "${1:-}" != "--skip-browser" ]; then
 fi
 
 echo
-echo "CodePilot Remote Worker v3.2 upgrade complete."
+echo "CodePilot Remote Worker v3.3 upgrade complete."
 echo "Agent:"
 systemctl --no-pager --full status codepilot-agent | sed -n '1,8p'
 echo
