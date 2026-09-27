@@ -15,10 +15,12 @@ from fastapi import FastAPI, Header, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
-app = FastAPI(title="CodePilot Remote Worker", version="3.2")
+app = FastAPI(title="CodePilot Remote Worker", version="3.3")
 
 SECRET = os.environ.get("CODEPILOT_AGENT_SECRET", "")
 GOOSE_BIN = os.environ.get("GOOSE_BIN", "/usr/local/bin/goose")
+CODEX_BIN = os.environ.get("CODEX_BIN", "/srv/codepilot-agent/bin/codex")
+GROK_BIN = os.environ.get("GROK_BIN", "/srv/codepilot-agent/bin/grok")
 TRAILBLAZE_BIN = os.environ.get("TRAILBLAZE_BIN", "trailblaze")
 TRAILBLAZE_PORT = int(os.environ.get("TRAILBLAZE_PORT", "52525"))
 WORKSPACE = Path(os.environ.get("CODEPILOT_WORKSPACE", "/srv/codepilot-workspace")).resolve()
@@ -46,6 +48,7 @@ STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
 class TaskRequest(BaseModel):
     prompt: str = Field(min_length=1, max_length=8000)
     mode: Literal["read", "workspace"] = "read"
+    provider: Literal["openrouter", "codex", "grok"] = "openrouter"
     web: bool = False
     chat_id: Optional[str] = Field(default=None, max_length=128)
 
@@ -105,6 +108,14 @@ def browser_capability() -> dict:
         "headless": True,
         "daemon_ready": tcp_ready("127.0.0.1", TRAILBLAZE_PORT) if trailblaze else False,
         "daemon_port": TRAILBLAZE_PORT if trailblaze else None,
+    }
+
+
+def provider_capabilities() -> dict:
+    return {
+        "openrouter": {"label": "OpenRouter / Goose", "available": bool(command_path(GOOSE_BIN)), "default": True},
+        "codex": {"label": "OpenAI Codex", "available": bool(command_path(CODEX_BIN)), "default": False},
+        "grok": {"label": "Grok", "available": bool(command_path(GROK_BIN)), "default": False},
     }
 
 
@@ -192,6 +203,46 @@ def goose_command(full_prompt: str):
     ]
 
 
+def provider_model_name(req: TaskRequest) -> str:
+    if req.provider == "codex":
+        return "OpenAI Codex"
+    if req.provider == "grok":
+        return "Grok"
+    return os.environ.get("GOOSE_MODEL", "openrouter/free")
+
+
+def provider_command(req: TaskRequest, full_prompt: str):
+    if req.provider == "codex":
+        mode = "read-only" if req.mode == "read" else "workspace-write"
+        command = [CODEX_BIN, "exec", "--ephemeral", "--skip-git-repo-check", "--sandbox", mode, "--cd", str(WORKSPACE), "--color", "never", full_prompt]
+    elif req.provider == "grok":
+        mode = "plan" if req.mode == "read" else "acceptEdits"
+        command = [GROK_BIN, "--single", full_prompt, "--output-format", "plain", "--cwd", str(WORKSPACE), "--max-turns", str(MAX_TURNS), "--permission-mode", mode]
+        if not req.web:
+            command.append("--disable-web-search")
+    else:
+        command = goose_command(full_prompt)
+    resolved = command_path(command[0])
+    if not resolved:
+        raise HTTPException(status_code=503, detail=provider_model_name(req) + " is not installed for the VM Agent")
+    command[0] = resolved
+    return command
+
+
+def normalize_plain(stdout: bytes, provider: str, model_name: str) -> dict:
+    result = stdout.decode("utf-8", "replace").strip()
+    if not result:
+        raise HTTPException(status_code=502, detail=model_name + " completed without a text response")
+    return {
+        "ok": True,
+        "result": result,
+        "tokens": {"total": None, "input": None, "output": None},
+        "cost_usd": None,
+        "inference": {"provider": provider, "requestedModel": model_name},
+        "status": "completed",
+    }
+
+
 def extract_result(payload: dict) -> str:
     if isinstance(payload.get("result"), str) and payload["result"].strip():
         return payload["result"]
@@ -254,6 +305,8 @@ async def execute(req: TaskRequest, wait_for_slot: bool = False, mission_id: Opt
     async with task_lock:
         task_id = mission_id or uuid.uuid4().hex[:12]
         full_prompt = policy_prompt(req)
+        model_name = provider_model_name(req)
+        command = provider_command(req, full_prompt)
         proc = None
         started_at = now_iso()
         started_monotonic = time.monotonic()
@@ -266,13 +319,14 @@ async def execute(req: TaskRequest, wait_for_slot: bool = False, mission_id: Opt
             "web": req.web,
             "stage": "starting",
             "started_at": started_at,
-            "model": os.environ.get("GOOSE_MODEL", "openrouter/free"),
+            "provider": req.provider,
+            "model": model_name,
         }
         try:
             if active_task and active_task.get("id") == task_id:
-                active_task["stage"] = "goose_running"
+                active_task["stage"] = req.provider + "_running"
             proc = await asyncio.create_subprocess_exec(
-                *goose_command(full_prompt),
+                *command,
                 cwd=str(WORKSPACE),
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
@@ -294,7 +348,7 @@ async def execute(req: TaskRequest, wait_for_slot: bool = False, mission_id: Opt
                 "chat_id": req.chat_id,
                 "status": "timed_out",
                 "web": req.web,
-                "model": os.environ.get("GOOSE_MODEL", "openrouter/free"),
+                "model": model_name,
                 "started_at": started_at,
                 "completed_at": now_iso(),
                 "duration_seconds": round(time.monotonic() - started_monotonic, 2),
@@ -315,7 +369,7 @@ async def execute(req: TaskRequest, wait_for_slot: bool = False, mission_id: Opt
                 "chat_id": req.chat_id,
                 "status": "cancelled",
                 "web": req.web,
-                "model": os.environ.get("GOOSE_MODEL", "openrouter/free"),
+                "model": model_name,
                 "started_at": started_at,
                 "completed_at": now_iso(),
                 "duration_seconds": round(time.monotonic() - started_monotonic, 2),
@@ -333,7 +387,7 @@ async def execute(req: TaskRequest, wait_for_slot: bool = False, mission_id: Opt
                 "chat_id": req.chat_id,
                 "status": "failed",
                 "web": req.web,
-                "model": os.environ.get("GOOSE_MODEL", "openrouter/free"),
+                "model": model_name,
                 "started_at": started_at,
                 "completed_at": now_iso(),
                 "duration_seconds": round(time.monotonic() - started_monotonic, 2),
@@ -342,26 +396,16 @@ async def execute(req: TaskRequest, wait_for_slot: bool = False, mission_id: Opt
             raise HTTPException(status_code=502, detail=detail or "Goose failed")
 
         try:
-            payload = json.loads(stdout.decode("utf-8"))
-        except Exception:
-            preview = stdout.decode("utf-8", "replace")[-800:]
-            detail = "Goose returned invalid JSON" + (": " + preview if preview else "")
-            last_run = {
-                "id": task_id,
-                "kind": "mission" if mission_id else "chat",
-                "chat_id": req.chat_id,
-                "status": "failed",
-                "web": req.web,
-                "model": os.environ.get("GOOSE_MODEL", "openrouter/free"),
-                "started_at": started_at,
-                "completed_at": now_iso(),
-                "duration_seconds": round(time.monotonic() - started_monotonic, 2),
-                "error": detail,
-            }
-            raise HTTPException(status_code=502, detail=detail)
-
-        try:
-            result = normalize(payload)
+            if req.provider == "openrouter":
+                try:
+                    payload = json.loads(stdout.decode("utf-8"))
+                except Exception:
+                    preview = stdout.decode("utf-8", "replace")[-800:]
+                    detail = "Goose returned invalid JSON" + (": " + preview if preview else "")
+                    raise HTTPException(status_code=502, detail=detail)
+                result = normalize(payload)
+            else:
+                result = normalize_plain(stdout, req.provider, model_name)
         except HTTPException as exc:
             last_run = {
                 "id": task_id,
@@ -369,7 +413,7 @@ async def execute(req: TaskRequest, wait_for_slot: bool = False, mission_id: Opt
                 "chat_id": req.chat_id,
                 "status": "failed",
                 "web": req.web,
-                "model": os.environ.get("GOOSE_MODEL", "openrouter/free"),
+                "model": model_name,
                 "started_at": started_at,
                 "completed_at": now_iso(),
                 "duration_seconds": round(time.monotonic() - started_monotonic, 2),
@@ -385,7 +429,7 @@ async def execute(req: TaskRequest, wait_for_slot: bool = False, mission_id: Opt
             "chat_id": req.chat_id,
             "status": "completed",
             "web": req.web,
-            "model": os.environ.get("GOOSE_MODEL", "openrouter/free"),
+            "model": model_name,
             "started_at": started_at,
             "completed_at": now_iso(),
             "duration_seconds": duration,
@@ -397,7 +441,7 @@ async def execute(req: TaskRequest, wait_for_slot: bool = False, mission_id: Opt
 
 def public_mission(mission: dict) -> dict:
     allowed = {
-        "id", "title", "prompt", "mode", "web", "status", "created_at", "started_at",
+        "id", "title", "prompt", "mode", "provider", "web", "status", "created_at", "started_at",
         "completed_at", "updated_at", "result", "error", "tokens", "duration_seconds",
         "cost_usd", "inference"
     }
@@ -447,6 +491,7 @@ async def mission_worker():
         req = TaskRequest(
             prompt=mission["prompt"],
             mode=mission["mode"],
+            provider=mission.get("provider", "openrouter"),
             web=bool(mission.get("web")),
             chat_id=None,
         )
@@ -491,11 +536,12 @@ async def health():
     browser = browser_capability()
     return {
         "ok": True,
-        "version": 3.2,
+        "version": 3.3,
         "workspace": str(WORKSPACE),
         "busy": task_lock.locked(),
         "queued_missions": sum(1 for item in missions.values() if item.get("status") == "queued"),
         "browser": {"available": browser["available"], "controller": browser["controller"]},
+        "providers": provider_capabilities(),
         "system": system_snapshot(),
     }
 
@@ -512,6 +558,7 @@ async def capabilities(authorization: Optional[str] = Header(default=None)):
         "terminal": True,
         "workspace": str(WORKSPACE),
         "browser": browser,
+        "providers": provider_capabilities(),
         "system": system_snapshot(),
         "queue": {
             "busy": task_lock.locked(),
@@ -664,7 +711,7 @@ async def task_stream(req: TaskRequest, authorization: Optional[str] = Header(de
         yield "event: status\ndata: " + json.dumps({"stage": "queued"}) + "\n\n"
         if task_lock.locked():
             yield "event: status\ndata: " + json.dumps({"stage": "waiting"}) + "\n\n"
-        yield "event: status\ndata: " + json.dumps({"stage": "goose_running"}) + "\n\n"
+        yield "event: status\ndata: " + json.dumps({"stage": req.provider + "_running"}) + "\n\n"
         try:
             result = await execute(req, wait_for_slot=True)
             yield "event: status\ndata: " + json.dumps({"stage": "completed"}) + "\n\n"
@@ -686,6 +733,7 @@ async def create_mission(req: MissionRequest, authorization: Optional[str] = Hea
         "title": title,
         "prompt": req.prompt,
         "mode": req.mode,
+        "provider": req.provider,
         "web": req.web,
         "status": "queued",
         "created_at": now_iso(),
