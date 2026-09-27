@@ -470,6 +470,7 @@ export default {
         const body = await safeJSON(request);
         const prompt = String(body?.prompt || "").trim();
         const mode = String(body?.mode || "read");
+        const provider = ["openrouter","codex","grok"].includes(String(body?.provider || "")) ? String(body.provider) : "openrouter";
         const web = body?.web === true;
         const chatId = String(body?.chatId || "").trim().slice(0, 128);
         if (!prompt) return json({ success: false, error: "Task prompt is required." }, 400);
@@ -487,7 +488,7 @@ export default {
           let vmResponse = await fetch(vmBase + "/agent/task/stream", {
             method: "POST",
             headers: commonHeaders,
-            body: JSON.stringify({ prompt, mode, web, chat_id: chatId || null }),
+            body: JSON.stringify({ prompt, mode, provider, web, chat_id: chatId || null }),
             signal: AbortSignal.timeout(300000)
           });
 
@@ -495,7 +496,7 @@ export default {
             vmResponse = await fetch(vmBase + "/agent/task", {
               method: "POST",
               headers: commonHeaders,
-              body: JSON.stringify({ prompt, mode, web, chat_id: chatId || null }),
+              body: JSON.stringify({ prompt, mode, provider, web, chat_id: chatId || null }),
               signal: AbortSignal.timeout(300000)
             });
           }
@@ -566,6 +567,9 @@ export default {
         const mode =
           String(body?.mode || "read");
 
+        const provider =
+          ["openrouter","codex","grok"].includes(String(body?.provider || "")) ? String(body.provider) : "openrouter";
+
         const web =
           body?.web === true;
 
@@ -616,6 +620,7 @@ export default {
                   JSON.stringify({
                     prompt,
                     mode,
+                    provider,
                     web,
                     chat_id: chatId || null
                   }),
@@ -829,7 +834,7 @@ export default {
       if (path === "/vm-agent/capabilities" && request.method === "GET") {
         try {
           const data = await callVmAgentJson("/agent/capabilities", { timeout: 12000 });
-          return json({ success: true, ...data });
+          return json({ success: true, providerRouting: true, ...data });
         } catch (error) {
           return json({ success: false, error: error?.message || String(error) }, error?.status >= 400 && error?.status < 600 ? 502 : 502);
         }
@@ -848,6 +853,7 @@ export default {
         const body = await safeJSON(request);
         const prompt = String(body?.prompt || "").trim();
         const mode = String(body?.mode || "read");
+        const provider = ["openrouter","codex","grok"].includes(String(body?.provider || "")) ? String(body.provider) : "openrouter";
         const web = body?.web === true;
         const title = String(body?.title || "").trim().slice(0, 120);
         if (!prompt) return json({ success: false, error: "Mission prompt is required." }, 400);
@@ -857,7 +863,7 @@ export default {
         try {
           const data = await callVmAgentJson("/agent/missions", {
             method: "POST",
-            body: { prompt, mode, web, title: title || undefined },
+            body: { prompt, mode, provider, web, title: title || undefined },
             timeout: 12000
           });
           return json({ success: true, ...data });
