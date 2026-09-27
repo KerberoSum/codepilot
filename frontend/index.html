@@ -485,6 +485,12 @@ button,input,textarea,select{font:inherit}button{cursor:pointer}.hidden{display:
             <option value="read">Read only</option>
             <option value="workspace">Workspace</option>
           </select>
+          <label for="vmAgentProvider" style="font-size:9px;color:var(--muted)">Brain</label>
+          <select id="vmAgentProvider" title="Choose which AI handles this VM Agent request">
+            <option value="openrouter">OpenRouter / Goose</option>
+            <option value="codex" disabled>OpenAI Codex · setup needed</option>
+            <option value="grok" disabled>Grok · setup needed</option>
+          </select>
           <label class="agent-toggle" title="Allow this conversation or mission to browse public websites">
             <input id="vmAgentWeb" type="checkbox">
             Web access
@@ -845,6 +851,7 @@ function setVmAgentPreset(prompt,mode="read",web=false){
 }
 
 function vmAgentWebEnabled(){return document.getElementById("vmAgentWeb")?.checked===true;}
+function vmAgentProvider(){return document.getElementById("vmAgentProvider")?.value||"openrouter";}
 
 async function loadVmChats(openRecent=false){
   try{
@@ -1067,18 +1074,19 @@ function parseSseChunk(buffer,onEvent){
   return buffer;
 }
 
-async function vmAgentPostJson(prompt,mode,web=false,chatId=""){
+async function vmAgentPostJson(prompt,mode,provider="openrouter",web=false,chatId=""){
   return await api("/vm-agent/task",{
     method:"POST",
     headers:{"Content-Type":"application/json"},
     signal:AbortSignal.timeout(305000),
-    body:JSON.stringify({prompt,mode,web,chatId})
+    body:JSON.stringify({prompt,mode,provider,web,chatId})
   });
 }
 
 async function runVmAgentTask(){
   const input=document.getElementById("vmAgentTask");
   const mode=document.getElementById("vmAgentMode").value;
+  const provider=vmAgentProvider();
   const web=vmAgentWebEnabled();
   const button=document.getElementById("vmAgentRunButton");
   const meta=document.getElementById("vmAgentMeta");
@@ -1106,7 +1114,7 @@ async function runVmAgentTask(){
       if(authToken)headers.set("Authorization","Bearer "+authToken);
       const r=await fetch(API_BASE_URL+"/vm-agent/task/stream",{
         method:"POST",headers,signal:AbortSignal.timeout(305000),
-        body:JSON.stringify({prompt:fullPrompt,mode,web,chatId:currentVmChat?.id||""})
+        body:JSON.stringify({prompt:fullPrompt,mode,provider,web,chatId:currentVmChat?.id||""})
       });
       if(r.status===401){clearAuthToken();showLogin();throw new Error("Your CodePilot session expired. Please sign in again.")}
       if(!r.ok){
@@ -1135,7 +1143,7 @@ async function runVmAgentTask(){
       if(e?.noFallback)throw e;
       streamFailure=e;
       meta.textContent="Stream interrupted — retrying normally…";
-      finalData=await vmAgentPostJson(fullPrompt,mode,web,currentVmChat?.id||"");
+      finalData=await vmAgentPostJson(fullPrompt,mode,provider,web,currentVmChat?.id||"");
     }
 
     if(finalData?.ok===false||finalData?.error)throw new Error(finalData.error||"VM Agent task failed.");
@@ -1315,6 +1323,16 @@ async function loadVmCapabilities(){
   try{
     const d=await api("/vm-agent/capabilities",{signal:AbortSignal.timeout(12000)});
     if(worker){worker.textContent=d.remote_worker?"Ready":"Unavailable";worker.className=d.remote_worker?"ready":"offline";}
+    const providerSelect=document.getElementById("vmAgentProvider"),providers=d.providers||{};
+    if(providerSelect){
+      [...providerSelect.options].forEach(option=>{
+        const info=providers[option.value];
+        if(option.value==="openrouter"){option.disabled=false;option.textContent="OpenRouter / Goose";return;}
+        option.disabled=!(d.providerRouting===true&&info&&info.available);
+        option.textContent=option.value==="codex"?"OpenAI Codex"+(option.disabled?" · setup needed":""):"Grok"+(option.disabled?" · setup needed":"");
+      });
+      if(providerSelect.selectedOptions[0]?.disabled)providerSelect.value="openrouter";
+    }
     const b=d.browser||{},s=d.system||{},q=d.queue||{};
     if(browser){
       if(b.available){
@@ -1384,12 +1402,12 @@ async function loadVmMissions(){
 async function queueVmMission(){
   const input=document.getElementById("vmAgentTask"),button=document.getElementById("vmMissionButton");
   const prompt=input.value.trim();if(!prompt||button.disabled)return;
-  const mode=document.getElementById("vmAgentMode").value,web=vmAgentWebEnabled();
+  const mode=document.getElementById("vmAgentMode").value,provider=vmAgentProvider(),web=vmAgentWebEnabled();
   button.disabled=true;document.getElementById("vmAgentMeta").textContent="Queuing mission…";
   try{
     const d=await api("/vm-agent/missions",{
       method:"POST",headers:{"Content-Type":"application/json"},
-      body:JSON.stringify({prompt,mode,web,title:prompt.split(/\n/)[0].slice(0,72)})
+      body:JSON.stringify({prompt,mode,provider,web,title:prompt.split(/\n/)[0].slice(0,72)})
     });
     input.value="";
     if(window.innerWidth<=760)toggleAgentPanel(false);
