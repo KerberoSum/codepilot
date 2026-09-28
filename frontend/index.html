@@ -408,7 +408,7 @@ button,input,textarea,select{font:inherit}button{cursor:pointer}.hidden{display:
   <header class="agent-page-top">
     <div class="agent-page-brand">
       <div class="logo">&lt;/&gt;</div>
-      <div><strong>CodePilot Remote Worker</strong><br><span>Chat, research the web, and hand off background missions to your Oracle VM</span></div>
+      <div><strong>CodePilot Remote Worker</strong><br><span>Chat, research the web, and queue follow-up commands on your Oracle VM</span></div>
     </div>
     <div class="agent-page-actions">
       <button class="agent-page-tab" onclick="switchAppPage('workspace')">Workspace</button>
@@ -443,9 +443,6 @@ button,input,textarea,select{font:inherit}button{cursor:pointer}.hidden{display:
         <button class="agent-quick" onclick="setVmAgentPreset('Research the latest reliable information about the topic I give you next. Browse public sources, compare them, and cite the page titles and URLs you used.','read',true)">Web research</button>
         <button class="agent-quick" onclick="setVmAgentPreset('Open the URL I give you next, inspect the rendered page, follow relevant links if needed, and summarize what you find.','read',true)">Inspect website</button>
       </div>
-
-      <div class="agent-side-title">MISSIONS</div>
-      <div id="vmMissionList" class="agent-mission-list"><div class="storage-empty">No missions yet.</div></div>
 
       <div class="agent-side-title">VM STATUS</div>
       <div class="agent-compact-strip">
@@ -504,7 +501,7 @@ button,input,textarea,select{font:inherit}button{cursor:pointer}.hidden{display:
             <option value="grok" disabled>Grok Build · setup needed</option>
             <option value="cursor" disabled>Cursor Agent · setup needed</option>
           </select>
-          <label class="agent-toggle" title="Allow this conversation or mission to browse public websites">
+          <label class="agent-toggle" title="Allow this chat and its queued commands to browse public websites">
             <input id="vmAgentWeb" type="checkbox" checked>
             Web access
           </label>
@@ -514,7 +511,7 @@ button,input,textarea,select{font:inherit}button{cursor:pointer}.hidden{display:
       </div>
 
       <div class="agent-transcript">
-        <div class="agent-welcome"><strong>Your VM is now a remote worker.</strong>Chat normally for quick work, enable Web access when online research is useful, or queue a Mission for longer work that should continue after you leave this page. Read only inspects; Workspace can change files only inside <code>/srv/codepilot-workspace</code>.</div>
+        <div class="agent-welcome"><strong>Your VM is now a remote worker.</strong>Chat normally and keep adding follow-up commands while work is running. Queued commands stay attached to this chat and run in order. Read only inspects; Workspace can change files only inside <code>/srv/codepilot-workspace</code>.</div>
         <div id="vmAgentConversation" class="agent-chat"></div>
         <div id="vmAgentMeta" class="vm-agent-meta agent-run-meta"></div>
       </div>
@@ -526,7 +523,7 @@ button,input,textarea,select{font:inherit}button{cursor:pointer}.hidden{display:
             <button class="agent-secondary" onclick="copyVmAgentOutput()">Copy last reply</button>
             <button class="agent-secondary" onclick="clearVmAgentCurrent()">New chat</button>
             <span style="flex:1;color:var(--muted);font-size:8px">Enter to send · Shift+Enter for a new line</span>
-            <button id="vmMissionButton" class="agent-secondary agent-mission-run" onclick="queueVmMission()">Queue mission</button>
+            <button id="vmQueueButton" class="agent-secondary agent-mission-run" onclick="queueVmCommand()">Queue command</button>
             <button id="vmAgentRunButton" class="vm-agent-run" onclick="runVmAgentTask()">Send</button>
           </div>
         </div>
@@ -644,7 +641,7 @@ let storageSnapshot=null;
 let vmMissionTimer=null;
 let vmStatusTimer=null;
 let vmActivePage="workspace";
-let vmChats=[], currentVmChat=null, vmAgentMessages=[];
+let vmChats=[], currentVmChat=null, vmAgentMessages=[], vmRemoteBusy=false;
 let terminalCwd="/srv/codepilot-workspace", terminalHistory=[], terminalHistoryIndex=0;
 const ATTACH_MAX_FILES=5;
 const ATTACH_MAX_FILE_BYTES=500*1024;
@@ -819,7 +816,7 @@ function scheduleVmMissionPoll(delay=20000){
     if(vmActivePage!=="agent")return;
     const items=await loadVmMissions().catch(()=>[]);
     const busy=Array.isArray(items)&&items.some(m=>["queued","running","cancelling"].includes(m.status));
-    if(vmActivePage==="agent")scheduleVmMissionPoll(busy?8000:20000);
+    if(vmActivePage==="agent")scheduleVmMissionPoll(busy?2500:12000);
   },delay);
 }
 
@@ -839,8 +836,8 @@ function switchAppPage(page){
     loadVmCapabilities().catch(()=>{});
     loadVmMissions().then(items=>{
       const busy=Array.isArray(items)&&items.some(m=>["queued","running","cancelling"].includes(m.status));
-      scheduleVmMissionPoll(busy?8000:20000);
-    }).catch(()=>scheduleVmMissionPoll(20000));
+      scheduleVmMissionPoll(busy?2500:12000);
+    }).catch(()=>scheduleVmMissionPoll(12000));
     refreshVmTaskStatus().then(d=>scheduleVmStatusPoll(d?.active?3000:15000)).catch(()=>scheduleVmStatusPoll(15000));
     setTimeout(()=>document.getElementById("vmAgentTask")?.focus(),30);
   }else if(page==="terminal"){
@@ -1049,7 +1046,11 @@ function appendVmAgentMessage(role,text,{error=false,pending=false,scroll=true,i
 function clearVmAgentCurrent(){newVmChat();}
 
 function vmAgentKeydown(e){
-  if(e.key==="Enter"&&!e.shiftKey&&!e.isComposing){e.preventDefault();runVmAgentTask();}
+  if(e.key==="Enter"&&!e.shiftKey&&!e.isComposing){
+    e.preventDefault();
+    const runButton=document.getElementById("vmAgentRunButton");
+    if(vmRemoteBusy||runButton?.disabled)queueVmCommand();else runVmAgentTask();
+  }
 }
 
 function buildVmAgentPrompt(prompt){
@@ -1156,7 +1157,8 @@ async function runVmAgentTask(){
   const button=document.getElementById("vmAgentRunButton");
   const meta=document.getElementById("vmAgentMeta");
   const prompt=input.value.trim();
-  if(!prompt||button.disabled)return;
+  if(!prompt)return;
+  if(button.disabled||vmRemoteBusy){queueVmCommand();return;}
 
   const contextPrompt=buildVmAgentPrompt(prompt);
   button.disabled=true;
@@ -1303,13 +1305,16 @@ function removeRecoveredVmPending(){
 }
 
 function ensureRecoveredVmPending(active){
-  if(!active||active.kind!=="chat"||!currentVmChat||active.chat_id!==currentVmChat.id){
+  if(!active||!["chat","queued_command"].includes(active.kind)||!currentVmChat||active.chat_id!==currentVmChat.id){
     removeRecoveredVmPending();return;
   }
   if(document.getElementById("vmAgentPending")||document.getElementById("vmAgentRecoveredPending"))return;
+  const queued=active.kind==="queued_command";
   appendVmAgentMessage(
     "assistant",
-    active.web?"Working on this request and browsing the web…":"Working on this request…",
+    queued
+      ?(active.web?"Running queued command with web access…":"Running queued command…")
+      :(active.web?"Working on this request and browsing the web…":"Working on this request…"),
     {pending:true,id:"vmAgentRecoveredPending"}
   );
 }
@@ -1321,8 +1326,10 @@ async function refreshVmTaskStatus(){
   try{
     const d=await api("/vm-agent/status",{signal:AbortSignal.timeout(10000)});
     const active=d.active||null;
+    vmRemoteBusy=!!active;
     if(stop)stop.disabled=!active;
-    if(queue)queue.textContent=active?("1 "+(active.kind||"task")+" · "+(d.queued_missions||0)+" wait"):("0 run · "+(d.queued_missions||0)+" wait");
+    const waiting=Number(d.queued_commands??d.queued_missions??0);
+    if(queue)queue.textContent=active?("1 run · "+waiting+" wait"):("0 run · "+waiting+" wait");
     renderVmLastRun(d.last_run||null);
 
     if(active){
@@ -1330,7 +1337,7 @@ async function refreshVmTaskStatus(){
       const elapsed=formatVmTaskElapsed(vmTaskElapsed(active));
       const model=active.model||d.model||"";
       const stage=active.stage==="goose_running"?"working":(active.stage||"running");
-      const owner=active.kind==="mission"?"Mission":"Chat";
+      const owner=active.kind==="queued_command"?"Queued command":"Chat";
       const web=active.web?" · web":"";
       const modelText=model?" · "+model:"";
       if(meta){
@@ -1343,7 +1350,7 @@ async function refreshVmTaskStatus(){
       setVmAgentStatus("online","Working · "+elapsed);
     }else{
       removeRecoveredVmPending();
-      if(meta&&/^(Chat|Mission|Remote Worker busy)/.test(meta.textContent||""))meta.textContent="Ready";
+      if(meta&&/^(Chat|Queued command|Remote Worker busy)/.test(meta.textContent||""))meta.textContent="Ready";
       setVmAgentStatus("online","Connected");
     }
     return d;
@@ -1447,69 +1454,62 @@ function missionTime(value){
   try{return new Date(value).toLocaleString()}catch{return value}
 }
 
-function renderVmMissions(items){
-  const box=document.getElementById("vmMissionList");if(!box)return;
-  if(!items?.length){box.innerHTML='<div class="storage-empty">No missions yet.</div>';return}
-  box.innerHTML="";
-  items.slice(0,8).forEach(m=>{
-    const card=document.createElement("div");card.className="agent-mission";
-    const top=document.createElement("div");top.className="agent-mission-top";
-    const title=document.createElement("div");title.className="agent-mission-title";title.textContent=m.title||m.prompt||"Mission";
-    const status=document.createElement("span");status.className="agent-mission-status "+(m.status||"");status.textContent=m.status||"unknown";
-    top.append(title,status);
-    const meta=document.createElement("div");meta.className="agent-mission-meta";
-    const runBits=[];
-    if(m.duration_seconds!=null)runBits.push(formatVmTaskElapsed(m.duration_seconds));
-    if(m.tokens?.total!=null)runBits.push(formatTokens(m.tokens.total)+" tokens");
-    meta.textContent=(m.mode||"read")+(m.web?" · web":"")+" · "+missionTime(m.created_at)+(runBits.length?" · "+runBits.join(" · "):"");
-    const actions=document.createElement("div");actions.className="agent-mission-actions";
-    if(m.result||m.error){
-      const view=document.createElement("button");view.className="agent-mission-btn";view.textContent="Open result";
-      view.onclick=()=>showVmMission(m);actions.appendChild(view);
-    }
-    if(["queued","running","cancelling"].includes(m.status)){
-      const cancel=document.createElement("button");cancel.className="agent-mission-btn";cancel.textContent=m.status==="cancelling"?"Cancelling…":"Cancel";cancel.disabled=m.status==="cancelling";
-      cancel.onclick=()=>cancelVmMission(m.id);actions.appendChild(cancel);
-    }
-    card.append(top,meta);if(actions.childNodes.length)card.appendChild(actions);box.appendChild(card);
-  });
+function renderVmQueueState(items){
+  const button=document.getElementById("vmQueueButton");if(!button)return;
+  const active=(Array.isArray(items)?items:[]).filter(m=>["queued","running","cancelling"].includes(m.status));
+  button.textContent=active.length?"Queue command ("+active.length+")":"Queue command";
+  button.title=active.length
+    ?active.length+" command"+(active.length===1?" is":"s are")+" waiting/running in this chat."
+    :"Add a follow-up command to this chat. It will run after the current task finishes.";
 }
 
 async function loadVmMissions(){
-  const d=await api("/vm-agent/missions",{signal:AbortSignal.timeout(12000)});
+  if(!currentVmChat){renderVmQueueState([]);return []}
+  const id=currentVmChat.id;
+  const d=await api("/vm-agent/missions?chatId="+encodeURIComponent(id),{signal:AbortSignal.timeout(12000)});
   const items=Array.isArray(d.missions)?d.missions:[];
-  renderVmMissions(items);
+  renderVmQueueState(items);
+  if(Array.isArray(d.synced_chat_ids)&&d.synced_chat_ids.includes(id)){
+    await openVmChat(id);
+  }
   return items;
 }
 
-async function queueVmMission(){
-  const input=document.getElementById("vmAgentTask"),button=document.getElementById("vmMissionButton");
-  const prompt=input.value.trim();if(!prompt||button.disabled)return;
+async function queueVmCommand(){
+  const input=document.getElementById("vmAgentTask"),button=document.getElementById("vmQueueButton");
+  const prompt=input.value.trim();if(!prompt||button?.disabled)return;
   const mode=document.getElementById("vmAgentMode").value,provider=vmAgentProvider(),web=vmAgentWebEnabled();
-  button.disabled=true;document.getElementById("vmAgentMeta").textContent="Queuing mission…";
+  const contextPrompt=buildVmAgentPrompt(prompt);
+  if(button)button.disabled=true;
+  document.getElementById("vmAgentMeta").textContent="Adding command to this chat queue…";
   try{
+    await ensureVmChat(prompt,mode,web,provider);
+    const chatId=currentVmChat?.id||"";
     const d=await api("/vm-agent/missions",{
       method:"POST",headers:{"Content-Type":"application/json"},
-      body:JSON.stringify({prompt,mode,provider,web,title:prompt.split(/\n/)[0].slice(0,72)})
+      body:JSON.stringify({
+        prompt,contextPrompt,chatId,mode,provider,web,
+        title:prompt.split(/\n/)[0].slice(0,72)
+      })
     });
     input.value="";
-    if(window.innerWidth<=760)toggleAgentPanel(false);
-    document.getElementById("vmAgentMeta").textContent="Mission queued · "+(d.mission?.id||"");
-    await loadVmMissions();
+    await openVmChat(chatId);
+    const items=await loadVmMissions();
+    const waiting=items.filter(m=>["queued","running","cancelling"].includes(m.status)).length;
+    document.getElementById("vmAgentMeta").textContent=
+      "Command attached to this chat · "+waiting+" queued/running";
+    scheduleVmMissionPoll(1800);
   }catch(e){
-    document.getElementById("vmAgentMeta").textContent="Could not queue mission · "+(e.message||e);
-  }finally{button.disabled=false;input.focus();}
+    document.getElementById("vmAgentMeta").textContent="Could not queue command · "+(e.message||e);
+  }finally{
+    if(button)button.disabled=false;
+    input.focus();
+  }
 }
 
 async function cancelVmMission(id){
   try{await api("/vm-agent/missions/"+encodeURIComponent(id),{method:"DELETE"});await loadVmMissions();}
   catch(e){document.getElementById("vmAgentMeta").textContent="Cancel failed · "+(e.message||e)}
-}
-
-function showVmMission(mission){
-  const text=mission.result||("Mission failed: "+(mission.error||"Unknown error"));
-  appendVmAgentMessage("assistant","**Mission: "+(mission.title||mission.id)+"**\n\n"+text,{error:!!mission.error});
-  document.getElementById("vmAgentMeta").textContent="Mission "+(mission.status||"")+" · "+missionTime(mission.completed_at||mission.updated_at);
 }
 
 function updateTerminalCwd(){
