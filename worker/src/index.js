@@ -469,8 +469,9 @@ export default {
         }
         const body = await safeJSON(request);
         const prompt = String(body?.prompt || "").trim();
+        const contextPrompt = String(body?.contextPrompt || "").trim().slice(0, 16000);
         const mode = String(body?.mode || "read");
-        const provider = ["openrouter","codex","grok"].includes(String(body?.provider || "")) ? String(body.provider) : "openrouter";
+        const provider = ["openrouter","codex","grok","cursor"].includes(String(body?.provider || "")) ? String(body.provider) : "openrouter";
         const web = body?.web === true;
         const chatId = String(body?.chatId || "").trim().slice(0, 128);
         if (!prompt) return json({ success: false, error: "Task prompt is required." }, 400);
@@ -488,7 +489,7 @@ export default {
           let vmResponse = await fetch(vmBase + "/agent/task/stream", {
             method: "POST",
             headers: commonHeaders,
-            body: JSON.stringify({ prompt, mode, provider, web, chat_id: chatId || null }),
+            body: JSON.stringify({ prompt, context_prompt: contextPrompt || null, mode, provider, web, chat_id: chatId || null }),
             signal: AbortSignal.timeout(300000)
           });
 
@@ -496,7 +497,7 @@ export default {
             vmResponse = await fetch(vmBase + "/agent/task", {
               method: "POST",
               headers: commonHeaders,
-              body: JSON.stringify({ prompt, mode, provider, web, chat_id: chatId || null }),
+              body: JSON.stringify({ prompt, context_prompt: contextPrompt || null, mode, provider, web, chat_id: chatId || null }),
               signal: AbortSignal.timeout(300000)
             });
           }
@@ -564,11 +565,14 @@ export default {
         const prompt =
           String(body?.prompt || "").trim();
 
+        const contextPrompt =
+          String(body?.contextPrompt || "").trim().slice(0, 16000);
+
         const mode =
           String(body?.mode || "read");
 
         const provider =
-          ["openrouter","codex","grok"].includes(String(body?.provider || "")) ? String(body.provider) : "openrouter";
+          ["openrouter","codex","grok","cursor"].includes(String(body?.provider || "")) ? String(body.provider) : "openrouter";
 
         const web =
           body?.web === true;
@@ -619,6 +623,7 @@ export default {
                 body:
                   JSON.stringify({
                     prompt,
+                    context_prompt: contextPrompt || null,
                     mode,
                     provider,
                     web,
@@ -853,7 +858,7 @@ export default {
         const body = await safeJSON(request);
         const prompt = String(body?.prompt || "").trim();
         const mode = String(body?.mode || "read");
-        const provider = ["openrouter","codex","grok"].includes(String(body?.provider || "")) ? String(body.provider) : "openrouter";
+        const provider = ["openrouter","codex","grok","cursor"].includes(String(body?.provider || "")) ? String(body.provider) : "openrouter";
         const web = body?.web === true;
         const title = String(body?.title || "").trim().slice(0, 120);
         if (!prompt) return json({ success: false, error: "Mission prompt is required." }, 400);
