@@ -500,7 +500,7 @@ button,input,textarea,select{font:inherit}button{cursor:pointer}.hidden{display:
           <label for="vmAgentProvider" style="font-size:9px;color:var(--muted)">Brain</label>
           <select id="vmAgentProvider" title="Choose which AI handles this VM Agent request">
             <option value="openrouter">OpenRouter / Goose</option>
-            <option value="codex" disabled>OpenAI Codex · setup needed</option>
+            <option value="codex" disabled>OpenAI Codex · uses Work credits</option>
             <option value="grok" disabled>Grok Build · setup needed</option>
             <option value="cursor" disabled>Cursor Agent · setup needed</option>
           </select>
@@ -1389,8 +1389,14 @@ async function loadVmCapabilities(){
       [...providerSelect.options].forEach(option=>{
         const info=providers[option.value];
         if(option.value==="openrouter"){option.disabled=false;option.textContent="OpenRouter / Goose";return;}
+        if(option.value==="codex"){
+          option.disabled=true;
+          option.textContent="OpenAI Codex · uses Work credits";
+          option.title="Disabled in CodePilot to protect your ChatGPT Work/Codex credit allowance.";
+          return;
+        }
         option.disabled=!(d.providerRouting===true&&info&&info.available);
-        const labels={codex:"OpenAI Codex",grok:"Grok Build",cursor:"Cursor Agent"};
+        const labels={grok:"Grok Build",cursor:"Cursor Agent"};
         option.textContent=(labels[option.value]||option.value)+(option.disabled?" · setup needed":"");
       });
       if(providerSelect.selectedOptions[0]?.disabled)providerSelect.value="openrouter";
