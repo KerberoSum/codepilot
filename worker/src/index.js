@@ -207,6 +207,92 @@ export default {
         `).run();
       }
 
+      function vmQueueTimestamp(value, fallback = Date.now()) {
+        const parsed = Date.parse(String(value || ""));
+        return Number.isFinite(parsed) ? parsed : fallback;
+      }
+
+      async function syncQueuedCommandToChat(mission) {
+        const chatId = String(mission?.chat_id || "").trim();
+        const queueId = String(mission?.id || "").trim();
+        if (!chatId || !queueId) return { chatId: null, changed: false };
+
+        await ensureVmChatTables();
+        const chat = await env.DB.prepare(
+          "SELECT id FROM vm_agent_chats WHERE id = ? LIMIT 1"
+        ).bind(chatId).first();
+        if (!chat) return { chatId, changed: false };
+
+        const provider = ["openrouter","codex","grok","cursor"].includes(String(mission?.provider || ""))
+          ? String(mission.provider) : "openrouter";
+        const mode = mission?.mode === "workspace" ? "workspace" : "read";
+        const web = mission?.web === true || Number(mission?.web || 0) === 1 ? 1 : 0;
+        const createdAt = vmQueueTimestamp(mission?.created_at);
+        let changed = false;
+
+        const userInsert = await env.DB.prepare(`
+          INSERT OR IGNORE INTO vm_agent_messages
+          (id, chat_id, role, content, created_at, mode, web, error)
+          VALUES (?, ?, 'user', ?, ?, ?, ?, 0)
+        `).bind(
+          "queue:" + queueId + ":user",
+          chatId,
+          String(mission?.prompt || ""),
+          createdAt,
+          mode,
+          web
+        ).run();
+        if (Number(userInsert?.meta?.changes || 0) > 0) changed = true;
+
+        const terminal = ["completed","failed","cancelled","interrupted"].includes(String(mission?.status || ""));
+        if (terminal) {
+          let content = "";
+          let error = 0;
+          if (mission.status === "completed") {
+            content = String(mission?.result || "").trim() || "Queued command completed.";
+          } else if (mission.status === "cancelled") {
+            content = "Queued command cancelled.";
+            error = 1;
+          } else if (mission.status === "interrupted") {
+            content = "Queued command interrupted: " + String(mission?.error || "the VM Agent restarted while it was running.");
+            error = 1;
+          } else {
+            content = "Queued command failed: " + String(mission?.error || "Unknown error");
+            error = 1;
+          }
+          const completedAt = vmQueueTimestamp(mission?.completed_at || mission?.updated_at, Date.now());
+          const assistantInsert = await env.DB.prepare(`
+            INSERT OR IGNORE INTO vm_agent_messages
+            (id, chat_id, role, content, created_at, mode, web, error)
+            VALUES (?, ?, 'assistant', ?, ?, ?, ?, ?)
+          `).bind(
+            "queue:" + queueId + ":assistant",
+            chatId,
+            content,
+            completedAt,
+            mode,
+            web,
+            error
+          ).run();
+          if (Number(assistantInsert?.meta?.changes || 0) > 0) changed = true;
+        }
+
+        if (changed) {
+          const updatedAt = terminal
+            ? vmQueueTimestamp(mission?.completed_at || mission?.updated_at, Date.now())
+            : createdAt;
+          await env.DB.prepare(`
+            UPDATE vm_agent_chats
+            SET mode = ?, web = ?, provider = ?,
+                updated_at = CASE WHEN updated_at < ? THEN ? ELSE updated_at END
+            WHERE id = ?
+          `).bind(mode, web, provider, updatedAt, updatedAt, chatId).run();
+        }
+
+        return { chatId, changed };
+      }
+
+
       async function getVmAgentBase() {
         try {
           await ensureVmRuntimeTable();
@@ -863,7 +949,15 @@ export default {
       if (path === "/vm-agent/missions" && request.method === "GET") {
         try {
           const data = await callVmAgentJson("/agent/missions", { timeout: 12000 });
-          return json({ success: true, ...data });
+          const chatId = String(url.searchParams.get("chatId") || "").trim().slice(0, 128);
+          const allItems = Array.isArray(data.missions) ? data.missions : [];
+          const items = chatId ? allItems.filter(item => String(item?.chat_id || "") === chatId) : allItems;
+          const syncedChatIds = new Set();
+          for (const item of items) {
+            const sync = await syncQueuedCommandToChat(item);
+            if (sync.changed && sync.chatId) syncedChatIds.add(sync.chatId);
+          }
+          return json({ success: true, ...data, missions: items, synced_chat_ids: [...syncedChatIds] });
         } catch (error) {
           return json({ success: false, error: error?.message || String(error) }, 502);
         }
@@ -872,20 +966,38 @@ export default {
       if (path === "/vm-agent/missions" && request.method === "POST") {
         const body = await safeJSON(request);
         const prompt = String(body?.prompt || "").trim();
-        const mode = String(body?.mode || "read");
+        const contextPrompt = String(body?.contextPrompt || "").trim().slice(0, 16000);
+        const chatId = String(body?.chatId || "").trim().slice(0, 128);
+        const mode = String(body?.mode || "workspace");
         const provider = ["openrouter","codex","grok","cursor"].includes(String(body?.provider || "")) ? String(body.provider) : "openrouter";
         const web = body?.web === true;
         const title = String(body?.title || "").trim().slice(0, 120);
-        if (!prompt) return json({ success: false, error: "Mission prompt is required." }, 400);
+        if (!prompt) return json({ success: false, error: "Queued command is required." }, 400);
+        if (!chatId) return json({ success: false, error: "A VM chat is required before queuing a command." }, 400);
         if (mode !== "read" && mode !== "workspace") {
           return json({ success: false, error: "Unsupported VM Agent mode." }, 400);
         }
         try {
+          await ensureVmChatTables();
+          const exists = await env.DB.prepare(
+            "SELECT id FROM vm_agent_chats WHERE id = ? LIMIT 1"
+          ).bind(chatId).first();
+          if (!exists) return json({ success: false, error: "VM Agent chat not found." }, 404);
+
           const data = await callVmAgentJson("/agent/missions", {
             method: "POST",
-            body: { prompt, mode, provider, web, title: title || undefined },
+            body: {
+              prompt,
+              context_prompt: contextPrompt || null,
+              chat_id: chatId,
+              mode,
+              provider,
+              web,
+              title: title || undefined
+            },
             timeout: 12000
           });
+          if (data?.mission) await syncQueuedCommandToChat(data.mission);
           return json({ success: true, ...data });
         } catch (error) {
           return json({ success: false, error: error?.message || String(error) }, 502);
