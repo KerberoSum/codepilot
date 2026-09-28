@@ -1,5 +1,5 @@
 [Unit]
-Description=CodePilot Remote Worker API v3.4
+Description=CodePilot Remote Worker API v3.5
 After=network-online.target
 Wants=network-online.target
 
