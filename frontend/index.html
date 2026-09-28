@@ -495,17 +495,17 @@ button,input,textarea,select{font:inherit}button{cursor:pointer}.hidden{display:
           <label for="vmAgentMode" style="font-size:9px;color:var(--muted)">Mode</label>
           <select id="vmAgentMode">
             <option value="read">Read only</option>
-            <option value="workspace">Workspace</option>
+            <option value="workspace" selected>Workspace</option>
           </select>
           <label for="vmAgentProvider" style="font-size:9px;color:var(--muted)">Brain</label>
-          <select id="vmAgentProvider" title="Choose which AI handles this VM Agent request">
+          <select id="vmAgentProvider" title="Choose which AI handles this VM Agent request" onchange="vmAgentProviderChanged()">
             <option value="openrouter">OpenRouter / Goose</option>
-            <option value="codex" disabled>OpenAI Codex · uses Work credits</option>
+            <option value="codex" disabled>OpenAI Codex · Work credits</option>
             <option value="grok" disabled>Grok Build · setup needed</option>
             <option value="cursor" disabled>Cursor Agent · setup needed</option>
           </select>
           <label class="agent-toggle" title="Allow this conversation or mission to browse public websites">
-            <input id="vmAgentWeb" type="checkbox">
+            <input id="vmAgentWeb" type="checkbox" checked>
             Web access
           </label>
           <button id="vmStopTaskButton" class="agent-secondary" onclick="stopVmCurrentTask()" title="Stop the currently running Remote Worker task">Stop task</button>
@@ -865,6 +865,15 @@ function setVmAgentPreset(prompt,mode="read",web=false){
 
 function vmAgentWebEnabled(){return document.getElementById("vmAgentWeb")?.checked===true;}
 function vmAgentProvider(){return document.getElementById("vmAgentProvider")?.value||"openrouter";}
+function vmAgentProviderChanged(){
+  const meta=document.getElementById("vmAgentMeta");
+  if(!meta)return;
+  if(vmAgentProvider()==="codex"){
+    meta.textContent="Codex uses ChatGPT Work/Codex credits · token usage will be shown after each run.";
+  }else if(!currentVmChat){
+    meta.textContent="";
+  }
+}
 
 async function loadVmChats(openRecent=false){
   try{
@@ -942,6 +951,7 @@ async function openVmChat(id){
       document.getElementById("vmAgentWeb").checked=!!Number(currentVmChat.web);
       const brain=document.getElementById("vmAgentProvider");
       if(brain&&currentVmChat.provider&&[...brain.options].some(o=>o.value===currentVmChat.provider&&!o.disabled))brain.value=currentVmChat.provider;
+      vmAgentProviderChanged();
       const i=vmChats.findIndex(x=>x.id===currentVmChat.id);
       if(i>=0)vmChats[i]={...vmChats[i],...currentVmChat};
     }
@@ -956,7 +966,10 @@ function newVmChat(){
   currentVmChat=null;vmAgentMessages=[];
   renderVmChatSelect();renderVmAgentConversation();
   const input=document.getElementById("vmAgentTask");if(input)input.value="";
+  const mode=document.getElementById("vmAgentMode");if(mode)mode.value="workspace";
+  const web=document.getElementById("vmAgentWeb");if(web)web.checked=true;
   document.getElementById("vmAgentMeta").textContent="";
+  vmAgentProviderChanged();
   input?.focus();
 }
 
@@ -1148,7 +1161,9 @@ async function runVmAgentTask(){
   const contextPrompt=buildVmAgentPrompt(prompt);
   button.disabled=true;
   input.value="";
-  meta.textContent="Queueing with Remote Worker…";
+  meta.textContent=provider==="codex"
+    ?"Codex uses Work credits · running now · token usage will be shown when complete…"
+    :"Queueing with Remote Worker…";
   const started=performance.now();
   let finalData=null,streamFailure=null,pending=null;
 
@@ -1390,9 +1405,9 @@ async function loadVmCapabilities(){
         const info=providers[option.value];
         if(option.value==="openrouter"){option.disabled=false;option.textContent="OpenRouter / Goose";return;}
         if(option.value==="codex"){
-          option.disabled=true;
-          option.textContent="OpenAI Codex · uses Work credits";
-          option.title="Disabled in CodePilot to protect your ChatGPT Work/Codex credit allowance.";
+          option.disabled=!(d.providerRouting===true&&info&&info.available);
+          option.textContent="OpenAI Codex · Work credits"+(option.disabled?" · setup needed":"");
+          option.title="Codex uses your ChatGPT Work/Codex credit allowance. Token usage is shown after each run.";
           return;
         }
         option.disabled=!(d.providerRouting===true&&info&&info.available);
