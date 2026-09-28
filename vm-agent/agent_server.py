@@ -15,16 +15,18 @@ from fastapi import FastAPI, Header, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
-app = FastAPI(title="CodePilot Remote Worker", version="3.3")
+app = FastAPI(title="CodePilot Remote Worker", version="3.4")
 
 SECRET = os.environ.get("CODEPILOT_AGENT_SECRET", "")
 GOOSE_BIN = os.environ.get("GOOSE_BIN", "/usr/local/bin/goose")
 CODEX_BIN = os.environ.get("CODEX_BIN", "/srv/codepilot-agent/bin/codex")
 GROK_BIN = os.environ.get("GROK_BIN", "/srv/codepilot-agent/bin/grok")
+CURSOR_BIN = os.environ.get("CURSOR_BIN", "/srv/codepilot-agent/.local/bin/cursor-agent")
 TRAILBLAZE_BIN = os.environ.get("TRAILBLAZE_BIN", "trailblaze")
 TRAILBLAZE_PORT = int(os.environ.get("TRAILBLAZE_PORT", "52525"))
 WORKSPACE = Path(os.environ.get("CODEPILOT_WORKSPACE", "/srv/codepilot-workspace")).resolve()
 STATE_FILE = Path(os.environ.get("CODEPILOT_MISSION_STATE", "/srv/codepilot-agent/missions.json")).resolve()
+PROVIDER_SESSION_STATE = Path(os.environ.get("CODEPILOT_PROVIDER_SESSION_STATE", "/srv/codepilot-agent/provider-sessions.json")).resolve()
 MAX_TURNS = int(os.environ.get("CODEPILOT_MAX_TURNS", "12"))
 TASK_TIMEOUT = int(os.environ.get("CODEPILOT_TASK_TIMEOUT", "300"))
 MISSION_HISTORY = int(os.environ.get("CODEPILOT_MISSION_HISTORY", "50"))
@@ -32,6 +34,7 @@ MISSION_HISTORY = int(os.environ.get("CODEPILOT_MISSION_HISTORY", "50"))
 task_lock = asyncio.Lock()
 mission_queue: asyncio.Queue = asyncio.Queue()
 missions: Dict[str, dict] = {}
+provider_sessions: Dict[str, dict] = {}
 active_processes: Dict[str, asyncio.subprocess.Process] = {}
 active_task: Optional[dict] = None
 active_task_process: Optional[asyncio.subprocess.Process] = None
@@ -43,14 +46,16 @@ if not SECRET:
 
 WORKSPACE.mkdir(parents=True, exist_ok=True)
 STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
+PROVIDER_SESSION_STATE.parent.mkdir(parents=True, exist_ok=True)
 
 
 class TaskRequest(BaseModel):
     prompt: str = Field(min_length=1, max_length=8000)
     mode: Literal["read", "workspace"] = "read"
-    provider: Literal["openrouter", "codex", "grok"] = "openrouter"
+    provider: Literal["openrouter", "codex", "grok", "cursor"] = "openrouter"
     web: bool = False
     chat_id: Optional[str] = Field(default=None, max_length=128)
+    context_prompt: Optional[str] = Field(default=None, max_length=16000)
 
 
 class MissionRequest(TaskRequest):
@@ -64,6 +69,57 @@ class TerminalRequest(BaseModel):
 
 def now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+def load_provider_sessions():
+    global provider_sessions
+    try:
+        data = json.loads(PROVIDER_SESSION_STATE.read_text(encoding="utf-8"))
+        provider_sessions = data if isinstance(data, dict) else {}
+    except FileNotFoundError:
+        provider_sessions = {}
+    except Exception:
+        provider_sessions = {}
+
+
+def save_provider_sessions():
+    temp = PROVIDER_SESSION_STATE.with_suffix(".tmp")
+    temp.write_text(json.dumps(provider_sessions, ensure_ascii=False, indent=2), encoding="utf-8")
+    os.chmod(temp, 0o600)
+    temp.replace(PROVIDER_SESSION_STATE)
+
+
+def provider_session_key(req: TaskRequest) -> str:
+    return req.provider + ":" + req.mode
+
+
+def get_provider_session(req: TaskRequest) -> Optional[str]:
+    if not req.chat_id or req.provider == "openrouter":
+        return None
+    chat = provider_sessions.get(req.chat_id)
+    if not isinstance(chat, dict):
+        return None
+    item = chat.get(provider_session_key(req))
+    if isinstance(item, dict):
+        value = item.get("session_id")
+        return str(value) if value else None
+    return str(item) if item else None
+
+
+def set_provider_session(req: TaskRequest, session_id: str):
+    if not req.chat_id or req.provider == "openrouter" or not session_id:
+        return
+    chat = provider_sessions.setdefault(req.chat_id, {})
+    chat[provider_session_key(req)] = {
+        "session_id": session_id,
+        "provider": req.provider,
+        "mode": req.mode,
+        "updated_at": now_iso(),
+    }
+    save_provider_sessions()
+
+
+load_provider_sessions()
 
 
 def require_auth(authorization: Optional[str]):
@@ -113,9 +169,10 @@ def browser_capability() -> dict:
 
 def provider_capabilities() -> dict:
     return {
-        "openrouter": {"label": "OpenRouter / Goose", "available": bool(command_path(GOOSE_BIN)), "default": True},
-        "codex": {"label": "OpenAI Codex", "available": bool(command_path(CODEX_BIN)), "default": False},
-        "grok": {"label": "Grok", "available": bool(command_path(GROK_BIN)), "default": False},
+        "openrouter": {"label": "OpenRouter / Goose", "available": bool(command_path(GOOSE_BIN)), "default": True, "persistent": False},
+        "codex": {"label": "OpenAI Codex", "available": bool(command_path(CODEX_BIN)), "default": False, "persistent": True},
+        "grok": {"label": "Grok Build", "available": bool(command_path(GROK_BIN)), "default": False, "persistent": True},
+        "cursor": {"label": "Cursor Agent", "available": bool(command_path(CURSOR_BIN)), "default": False, "persistent": True},
     }
 
 
@@ -151,7 +208,7 @@ def system_snapshot() -> dict:
     }
 
 
-def policy_prompt(req: TaskRequest) -> str:
+def policy_prompt(req: TaskRequest, task_prompt: Optional[str] = None) -> str:
     if req.mode == "read":
         rules = """MODE: READ ONLY.
 You may inspect system information, files, directories, processes, logs, networking, and git status/log/diff.
@@ -182,7 +239,7 @@ WEB ACCESS: DISABLED.
 Do not browse websites or make outbound web requests for this task. If current online information is required, tell the user to enable Web access.
 """
 
-    return rules + "\n" + web_rules + "\nUSER TASK:\n" + req.prompt
+    return rules + "\n" + web_rules + "\nUSER TASK:\n" + (task_prompt if task_prompt is not None else req.prompt)
 
 
 def goose_command(full_prompt: str):
@@ -207,19 +264,52 @@ def provider_model_name(req: TaskRequest) -> str:
     if req.provider == "codex":
         return "OpenAI Codex"
     if req.provider == "grok":
-        return "Grok"
+        return "Grok Build"
+    if req.provider == "cursor":
+        return "Cursor Agent"
     return os.environ.get("GOOSE_MODEL", "openrouter/free")
 
 
-def provider_command(req: TaskRequest, full_prompt: str):
+def provider_command(req: TaskRequest, full_prompt: str, session_id: Optional[str] = None):
     if req.provider == "codex":
-        mode = "read-only" if req.mode == "read" else "workspace-write"
-        command = [CODEX_BIN, "exec", "--ephemeral", "--skip-git-repo-check", "--sandbox", mode, "--cd", str(WORKSPACE), "--color", "never", full_prompt]
+        if session_id:
+            command = [
+                CODEX_BIN, "exec", "resume", "--skip-git-repo-check", "--json",
+                session_id, full_prompt
+            ]
+        else:
+            mode = "read-only" if req.mode == "read" else "workspace-write"
+            command = [
+                CODEX_BIN, "exec", "--skip-git-repo-check", "--sandbox", mode,
+                "--cd", str(WORKSPACE), "--color", "never", "--json", full_prompt
+            ]
+            if not req.chat_id:
+                command.insert(2, "--ephemeral")
     elif req.provider == "grok":
-        mode = "plan" if req.mode == "read" else "acceptEdits"
-        command = [GROK_BIN, "--single", full_prompt, "--output-format", "plain", "--cwd", str(WORKSPACE), "--max-turns", str(MAX_TURNS), "--permission-mode", mode]
+        sandbox = "read-only" if req.mode == "read" else "workspace"
+        command = [
+            GROK_BIN, "--single", full_prompt, "--output-format", "json",
+            "--cwd", str(WORKSPACE), "--max-turns", str(MAX_TURNS),
+            "--sandbox", sandbox,
+        ]
+        if session_id:
+            command.extend(["--resume", session_id])
+        if req.mode == "workspace":
+            command.append("--always-approve")
         if not req.web:
             command.append("--disable-web-search")
+    elif req.provider == "cursor":
+        command = [
+            CURSOR_BIN, "--print", "--output-format", "json", "--trust",
+            "--sandbox", "enabled", "--workspace", str(WORKSPACE),
+        ]
+        if req.mode == "read":
+            command.extend(["--mode", "ask"])
+        else:
+            command.append("--force")
+        if session_id:
+            command.append("--resume=" + session_id)
+        command.append(full_prompt)
     else:
         command = goose_command(full_prompt)
     resolved = command_path(command[0])
@@ -229,17 +319,92 @@ def provider_command(req: TaskRequest, full_prompt: str):
     return command
 
 
-def normalize_plain(stdout: bytes, provider: str, model_name: str) -> dict:
-    result = stdout.decode("utf-8", "replace").strip()
-    if not result:
+def normalize_codex(stdout: bytes, model_name: str) -> dict:
+    session_id = None
+    result_text = ""
+    usage = {}
+    for raw in stdout.decode("utf-8", "replace").splitlines():
+        try:
+            event = json.loads(raw)
+        except Exception:
+            continue
+        if event.get("type") == "thread.started":
+            session_id = event.get("thread_id") or session_id
+        item = event.get("item") if isinstance(event.get("item"), dict) else {}
+        if event.get("type") == "item.completed" and item.get("type") == "agent_message":
+            text = item.get("text")
+            if isinstance(text, str) and text.strip():
+                result_text = text.strip()
+        if event.get("type") == "turn.completed" and isinstance(event.get("usage"), dict):
+            usage = event["usage"]
+    if not result_text:
         raise HTTPException(status_code=502, detail=model_name + " completed without a text response")
+    inp = usage.get("input_tokens")
+    out = usage.get("output_tokens")
+    total = (inp + out) if isinstance(inp, int) and isinstance(out, int) else None
     return {
         "ok": True,
-        "result": result,
-        "tokens": {"total": None, "input": None, "output": None},
+        "result": result_text,
+        "tokens": {"total": total, "input": inp, "output": out, "cached_input": usage.get("cached_input_tokens")},
         "cost_usd": None,
-        "inference": {"provider": provider, "requestedModel": model_name},
+        "inference": {"provider": "codex", "requestedModel": model_name},
         "status": "completed",
+        "_session_id": session_id,
+    }
+
+
+def normalize_grok(stdout: bytes, model_name: str) -> dict:
+    try:
+        payload = json.loads(stdout.decode("utf-8"))
+    except Exception:
+        raise HTTPException(status_code=502, detail="Grok Build returned invalid JSON")
+    text = payload.get("text")
+    if not isinstance(text, str) or not text.strip():
+        raise HTTPException(status_code=502, detail=model_name + " completed without a text response")
+    usage = payload.get("usage") if isinstance(payload.get("usage"), dict) else {}
+    model_usage = payload.get("modelUsage") if isinstance(payload.get("modelUsage"), dict) else {}
+    actual_model = next(iter(model_usage.keys()), model_name)
+    return {
+        "ok": True,
+        "result": text.strip(),
+        "tokens": {
+            "total": usage.get("total_tokens"),
+            "input": usage.get("input_tokens"),
+            "output": usage.get("output_tokens"),
+            "cached_input": usage.get("cache_read_input_tokens"),
+        },
+        "cost_usd": payload.get("total_cost_usd"),
+        "inference": {"provider": "grok", "requestedModel": actual_model},
+        "status": "completed",
+        "_session_id": payload.get("sessionId"),
+    }
+
+
+def normalize_cursor(stdout: bytes, model_name: str) -> dict:
+    try:
+        payload = json.loads(stdout.decode("utf-8"))
+    except Exception:
+        raise HTTPException(status_code=502, detail="Cursor Agent returned invalid JSON")
+    text = payload.get("result")
+    if not isinstance(text, str) or not text.strip():
+        raise HTTPException(status_code=502, detail=model_name + " completed without a text response")
+    usage = payload.get("usage") if isinstance(payload.get("usage"), dict) else {}
+    inp = usage.get("inputTokens")
+    out = usage.get("outputTokens")
+    total = (inp + out) if isinstance(inp, int) and isinstance(out, int) else None
+    return {
+        "ok": True,
+        "result": text.strip(),
+        "tokens": {
+            "total": total,
+            "input": inp,
+            "output": out,
+            "cached_input": usage.get("cacheReadTokens"),
+        },
+        "cost_usd": None,
+        "inference": {"provider": "cursor", "requestedModel": model_name},
+        "status": "completed",
+        "_session_id": payload.get("session_id"),
     }
 
 
@@ -304,9 +469,16 @@ async def execute(req: TaskRequest, wait_for_slot: bool = False, mission_id: Opt
 
     async with task_lock:
         task_id = mission_id or uuid.uuid4().hex[:12]
-        full_prompt = policy_prompt(req)
+        native_session_id = get_provider_session(req)
+        if req.provider == "openrouter":
+            provider_prompt = req.context_prompt or req.prompt
+        elif native_session_id:
+            provider_prompt = req.prompt
+        else:
+            provider_prompt = req.context_prompt or req.prompt
+        full_prompt = policy_prompt(req, provider_prompt)
         model_name = provider_model_name(req)
-        command = provider_command(req, full_prompt)
+        command = provider_command(req, full_prompt, native_session_id)
         proc = None
         started_at = now_iso()
         started_monotonic = time.monotonic()
@@ -404,8 +576,14 @@ async def execute(req: TaskRequest, wait_for_slot: bool = False, mission_id: Opt
                     detail = "Goose returned invalid JSON" + (": " + preview if preview else "")
                     raise HTTPException(status_code=502, detail=detail)
                 result = normalize(payload)
+            elif req.provider == "codex":
+                result = normalize_codex(stdout, model_name)
+            elif req.provider == "grok":
+                result = normalize_grok(stdout, model_name)
+            elif req.provider == "cursor":
+                result = normalize_cursor(stdout, model_name)
             else:
-                result = normalize_plain(stdout, req.provider, model_name)
+                raise HTTPException(status_code=500, detail="Unsupported provider")
         except HTTPException as exc:
             last_run = {
                 "id": task_id,
@@ -420,6 +598,16 @@ async def execute(req: TaskRequest, wait_for_slot: bool = False, mission_id: Opt
                 "error": str(exc.detail),
             }
             raise
+
+        session_id = result.pop("_session_id", None)
+        if session_id and req.chat_id and req.provider != "openrouter":
+            set_provider_session(req, str(session_id))
+            result["native_session"] = {
+                "id": str(session_id),
+                "provider": req.provider,
+                "mode": req.mode,
+                "resumed": bool(native_session_id),
+            }
 
         duration = round(time.monotonic() - started_monotonic, 2)
         result["duration_seconds"] = duration
@@ -536,7 +724,7 @@ async def health():
     browser = browser_capability()
     return {
         "ok": True,
-        "version": 3.3,
+        "version": 3.4,
         "workspace": str(WORKSPACE),
         "busy": task_lock.locked(),
         "queued_missions": sum(1 for item in missions.values() if item.get("status") == "queued"),
