@@ -15,7 +15,7 @@ from fastapi import FastAPI, Header, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
-app = FastAPI(title="CodePilot Remote Worker", version="3.4")
+app = FastAPI(title="CodePilot Remote Worker", version="3.5")
 
 SECRET = os.environ.get("CODEPILOT_AGENT_SECRET", "")
 GOOSE_BIN = os.environ.get("GOOSE_BIN", "/usr/local/bin/goose")
@@ -484,7 +484,7 @@ async def execute(req: TaskRequest, wait_for_slot: bool = False, mission_id: Opt
         started_monotonic = time.monotonic()
         active_task = {
             "id": task_id,
-            "kind": "mission" if mission_id else "chat",
+            "kind": "queued_command" if mission_id else "chat",
             "chat_id": req.chat_id,
             "prompt": req.prompt[:240],
             "mode": req.mode,
@@ -516,7 +516,7 @@ async def execute(req: TaskRequest, wait_for_slot: bool = False, mission_id: Opt
                     pass
             last_run = {
                 "id": task_id,
-                "kind": "mission" if mission_id else "chat",
+                "kind": "queued_command" if mission_id else "chat",
                 "chat_id": req.chat_id,
                 "status": "timed_out",
                 "web": req.web,
@@ -537,7 +537,7 @@ async def execute(req: TaskRequest, wait_for_slot: bool = False, mission_id: Opt
             cancelled_task_ids.discard(task_id)
             last_run = {
                 "id": task_id,
-                "kind": "mission" if mission_id else "chat",
+                "kind": "queued_command" if mission_id else "chat",
                 "chat_id": req.chat_id,
                 "status": "cancelled",
                 "web": req.web,
@@ -549,13 +549,13 @@ async def execute(req: TaskRequest, wait_for_slot: bool = False, mission_id: Opt
             raise HTTPException(status_code=409, detail="Remote Worker task cancelled")
 
         if mission_id and missions.get(mission_id, {}).get("status") == "cancelling":
-            raise HTTPException(status_code=409, detail="Mission cancelled")
+            raise HTTPException(status_code=409, detail="Queued command cancelled")
 
         if proc is None or proc.returncode != 0:
             detail = stderr.decode("utf-8", "replace")[-1800:] if proc else "Goose failed to start"
             last_run = {
                 "id": task_id,
-                "kind": "mission" if mission_id else "chat",
+                "kind": "queued_command" if mission_id else "chat",
                 "chat_id": req.chat_id,
                 "status": "failed",
                 "web": req.web,
@@ -587,7 +587,7 @@ async def execute(req: TaskRequest, wait_for_slot: bool = False, mission_id: Opt
         except HTTPException as exc:
             last_run = {
                 "id": task_id,
-                "kind": "mission" if mission_id else "chat",
+                "kind": "queued_command" if mission_id else "chat",
                 "chat_id": req.chat_id,
                 "status": "failed",
                 "web": req.web,
@@ -613,7 +613,7 @@ async def execute(req: TaskRequest, wait_for_slot: bool = False, mission_id: Opt
         result["duration_seconds"] = duration
         last_run = {
             "id": task_id,
-            "kind": "mission" if mission_id else "chat",
+            "kind": "queued_command" if mission_id else "chat",
             "chat_id": req.chat_id,
             "status": "completed",
             "web": req.web,
@@ -629,7 +629,7 @@ async def execute(req: TaskRequest, wait_for_slot: bool = False, mission_id: Opt
 
 def public_mission(mission: dict) -> dict:
     allowed = {
-        "id", "title", "prompt", "mode", "provider", "web", "status", "created_at", "started_at",
+        "id", "title", "prompt", "mode", "provider", "web", "chat_id", "status", "created_at", "started_at",
         "completed_at", "updated_at", "result", "error", "tokens", "duration_seconds",
         "cost_usd", "inference"
     }
@@ -638,7 +638,12 @@ def public_mission(mission: dict) -> dict:
 
 def save_missions():
     ordered = sorted(missions.values(), key=lambda item: item.get("created_at", ""), reverse=True)[:MISSION_HISTORY]
-    payload = [public_mission(item) for item in ordered]
+    payload = []
+    for item in ordered:
+        stored = public_mission(item)
+        if item.get("context_prompt"):
+            stored["context_prompt"] = item["context_prompt"]
+        payload.append(stored)
     temp = STATE_FILE.with_suffix(".tmp")
     temp.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
     temp.replace(STATE_FILE)
@@ -654,9 +659,9 @@ def load_missions():
         for item in data[:MISSION_HISTORY]:
             if not isinstance(item, dict) or not item.get("id"):
                 continue
-            if item.get("status") in {"running", "cancelling", "queued"}:
+            if item.get("status") in {"running", "cancelling"}:
                 item["status"] = "interrupted"
-                item["error"] = "Agent service restarted before this mission finished."
+                item["error"] = "Agent service restarted while this queued command was running."
                 item["completed_at"] = now_iso()
             missions[str(item["id"])] = item
     except Exception:
@@ -678,17 +683,18 @@ async def mission_worker():
 
         req = TaskRequest(
             prompt=mission["prompt"],
+            context_prompt=mission.get("context_prompt"),
             mode=mission["mode"],
             provider=mission.get("provider", "openrouter"),
             web=bool(mission.get("web")),
-            chat_id=None,
+            chat_id=mission.get("chat_id"),
         )
 
         try:
             result = await execute(req, wait_for_slot=True, mission_id=mission_id)
             if mission.get("status") == "cancelling":
                 mission["status"] = "cancelled"
-                mission["error"] = "Mission cancelled."
+                mission["error"] = "Queued command cancelled."
             else:
                 mission["status"] = "completed"
                 mission["result"] = result.get("result", "")
@@ -697,9 +703,9 @@ async def mission_worker():
                 mission["cost_usd"] = result.get("cost_usd")
                 mission["inference"] = result.get("inference", {})
         except HTTPException as exc:
-            if mission.get("status") == "cancelling" or str(exc.detail) == "Mission cancelled":
+            if mission.get("status") == "cancelling" or str(exc.detail) == "Queued command cancelled":
                 mission["status"] = "cancelled"
-                mission["error"] = "Mission cancelled."
+                mission["error"] = "Queued command cancelled."
             else:
                 mission["status"] = "failed"
                 mission["error"] = str(exc.detail)
@@ -716,6 +722,12 @@ async def mission_worker():
 @app.on_event("startup")
 async def startup():
     load_missions()
+    queued = sorted(
+        (item for item in missions.values() if item.get("status") == "queued"),
+        key=lambda item: item.get("created_at", ""),
+    )
+    for item in queued:
+        mission_queue.put_nowait(str(item["id"]))
     asyncio.create_task(mission_worker())
 
 
@@ -724,10 +736,11 @@ async def health():
     browser = browser_capability()
     return {
         "ok": True,
-        "version": 3.4,
+        "version": 3.5,
         "workspace": str(WORKSPACE),
         "busy": task_lock.locked(),
         "queued_missions": sum(1 for item in missions.values() if item.get("status") == "queued"),
+        "queued_commands": sum(1 for item in missions.values() if item.get("status") == "queued"),
         "browser": {"available": browser["available"], "controller": browser["controller"]},
         "providers": provider_capabilities(),
         "system": system_snapshot(),
@@ -777,6 +790,7 @@ async def agent_status(authorization: Optional[str] = Header(default=None)):
         "busy": task_lock.locked(),
         "active": snapshot,
         "queued_missions": sum(1 for item in missions.values() if item.get("status") == "queued"),
+        "queued_commands": sum(1 for item in missions.values() if item.get("status") == "queued"),
         "model": os.environ.get("GOOSE_MODEL", "openrouter/free"),
         "last_run": last_run,
     }
@@ -789,7 +803,7 @@ async def cancel_current_task(authorization: Optional[str] = Header(default=None
     if not active_task or not active_task_process:
         return {"ok": True, "cancelled": False, "message": "No active Remote Worker task."}
     task_id = str(active_task.get("id") or "")
-    if active_task.get("kind") == "mission" and task_id in missions:
+    if active_task.get("kind") == "queued_command" and task_id in missions:
         missions[task_id]["status"] = "cancelling"
         missions[task_id]["updated_at"] = now_iso()
         save_missions()
@@ -915,11 +929,13 @@ async def task_stream(req: TaskRequest, authorization: Optional[str] = Header(de
 async def create_mission(req: MissionRequest, authorization: Optional[str] = Header(default=None)):
     require_auth(authorization)
     mission_id = uuid.uuid4().hex[:12]
-    title = (req.title or req.prompt.strip().splitlines()[0][:72] or "Mission").strip()
+    title = (req.title or req.prompt.strip().splitlines()[0][:72] or "Queued command").strip()
     mission = {
         "id": mission_id,
         "title": title,
         "prompt": req.prompt,
+        "context_prompt": req.context_prompt,
+        "chat_id": req.chat_id,
         "mode": req.mode,
         "provider": req.provider,
         "web": req.web,
@@ -945,7 +961,7 @@ async def get_mission(mission_id: str, authorization: Optional[str] = Header(def
     require_auth(authorization)
     mission = missions.get(mission_id)
     if not mission:
-        raise HTTPException(status_code=404, detail="Mission not found")
+        raise HTTPException(status_code=404, detail="Queued command not found")
     return {"ok": True, "mission": public_mission(mission)}
 
 
@@ -954,12 +970,12 @@ async def cancel_mission(mission_id: str, authorization: Optional[str] = Header(
     require_auth(authorization)
     mission = missions.get(mission_id)
     if not mission:
-        raise HTTPException(status_code=404, detail="Mission not found")
+        raise HTTPException(status_code=404, detail="Queued command not found")
 
     status = mission.get("status")
     if status == "queued":
         mission["status"] = "cancelled"
-        mission["error"] = "Mission cancelled before it started."
+        mission["error"] = "Queued command cancelled before it started."
         mission["completed_at"] = now_iso()
     elif status == "running":
         mission["status"] = "cancelling"
@@ -972,7 +988,7 @@ async def cancel_mission(mission_id: str, authorization: Optional[str] = Header(
     elif status in {"completed", "failed", "cancelled", "interrupted"}:
         return {"ok": True, "mission": public_mission(mission)}
     else:
-        raise HTTPException(status_code=409, detail="Mission cannot be cancelled in its current state")
+        raise HTTPException(status_code=409, detail="Queued command cannot be cancelled in its current state")
 
     mission["updated_at"] = now_iso()
     save_missions()
