@@ -139,7 +139,7 @@ button,input,textarea,select{font:inherit}button{cursor:pointer}.hidden{display:
 .agent-page-brand{display:flex;align-items:center;gap:10px;min-width:0}.agent-page-brand strong{font-size:15px}.agent-page-brand span{font-size:9px;color:var(--muted)}
 .agent-page-actions{display:flex;align-items:center;gap:7px}.agent-page-tab{border:1px solid var(--border);background:var(--panel2);color:var(--muted);border-radius:8px;padding:7px 10px;font-size:10px;font-weight:700}.agent-page-tab:hover{color:#fff;background:var(--panel3)}.agent-page-tab.active{background:var(--accent);border-color:var(--accent);color:#fff}
 .agent-page-body{flex:1;min-height:0;display:grid;grid-template-columns:minmax(235px,300px) minmax(0,1fr);overflow:hidden}
-.agent-side{min-width:0;min-height:0;overflow:auto;border-right:1px solid var(--border);background:var(--panel);padding:14px 12px}
+.agent-side{min-width:0;min-height:0;overflow:auto;border-right:1px solid var(--border);background:var(--panel);padding:10px 9px}
 .agent-main{min-width:0;min-height:0;display:flex;flex-direction:column;background:var(--editor)}
 .agent-main-head{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:11px 14px;border-bottom:1px solid var(--border);background:var(--panel)}
 .agent-main-head-left{display:flex;align-items:center;gap:8px;min-width:0}.agent-main-head-left strong{font-size:12px}.agent-main-head-left span{font-size:9px;color:var(--muted)}
@@ -156,12 +156,19 @@ button,input,textarea,select{font:inherit}button{cursor:pointer}.hidden{display:
 .agent-composer-inner{max-width:900px;margin:0 auto;border:1px solid var(--border);border-radius:12px;background:var(--panel2);overflow:hidden}
 .agent-composer textarea{width:100%;min-height:88px;max-height:220px;resize:vertical;border:0;outline:0;background:transparent;color:#fff;padding:12px;font:inherit;line-height:1.55}
 .agent-composer-actions{display:flex;align-items:center;gap:7px;padding:7px 8px;border-top:1px solid var(--border2);flex-wrap:wrap}
-.agent-side-title{font-size:10px;font-weight:800;letter-spacing:.8px;color:var(--muted);margin:3px 0 8px}.agent-quick-grid{display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-bottom:14px}
-.agent-quick{border:1px solid var(--border);background:var(--panel2);color:#d9e0e9;border-radius:8px;padding:8px;text-align:left;font-size:9px;line-height:1.35}.agent-quick:hover{background:var(--panel3);color:#fff}
-.agent-stat-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:6px;margin-bottom:14px}.agent-stat{border:1px solid var(--border);background:var(--panel2);border-radius:8px;padding:8px}.agent-stat span{display:block;color:var(--muted);font-size:8px;margin-bottom:3px}.agent-stat b{font-size:11px;color:#fff}
+.agent-side-title{font-size:9px;font-weight:800;letter-spacing:.75px;color:var(--muted);margin:8px 0 5px}.agent-quick-grid{display:grid;grid-template-columns:1fr 1fr;gap:4px;margin-bottom:8px}
+.agent-quick{border:1px solid var(--border);background:var(--panel2);color:#d9e0e9;border-radius:7px;padding:5px 6px;text-align:left;font-size:8px;line-height:1.25}.agent-quick:hover{background:var(--panel3);color:#fff}
+.agent-stat-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:4px;margin-bottom:8px}.agent-stat{border:1px solid var(--border);background:var(--panel2);border-radius:7px;padding:5px 6px}.agent-stat span{display:block;color:var(--muted);font-size:7px;margin-bottom:2px}.agent-stat b{font-size:9px;color:#fff}
 .agent-history-list{max-height:42vh;overflow:auto;border:1px solid var(--border);border-radius:8px}.agent-history-list .storage-item{grid-template-columns:minmax(0,1fr) auto}
 .agent-secondary{border:1px solid var(--border);background:var(--panel3);color:var(--muted);border-radius:7px;padding:7px 9px;font-size:9px}.agent-secondary:hover{color:#fff;background:var(--border)}
 .agent-session-controls{display:flex;align-items:center;gap:5px;min-width:0}.agent-session-controls .chat-select{max-width:190px}
+.agent-chat-session-head{display:flex;align-items:center;justify-content:space-between;gap:6px;margin-bottom:5px}.agent-chat-session-head .agent-side-title{margin:0}.agent-chat-new{padding:4px 7px;font-size:8px}
+.agent-chat-list{display:flex;flex-direction:column;gap:4px;max-height:250px;overflow:auto;margin-bottom:6px}
+.agent-chat-row{width:100%;border:1px solid var(--border);background:var(--panel2);border-radius:8px;padding:7px 8px;text-align:left;color:var(--text)}.agent-chat-row:hover{background:var(--panel3)}.agent-chat-row.active{border-color:rgba(116,87,255,.72);background:rgba(116,87,255,.12)}
+.agent-chat-row-title{font-size:9px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-bottom:4px}
+.agent-chat-row-meta{display:flex;align-items:center;gap:5px;color:var(--muted);font-size:7px;min-width:0}.agent-brain-badge{border:1px solid var(--border);border-radius:999px;padding:2px 5px;color:#d9e0e9;background:var(--panel3);white-space:nowrap}.agent-chat-last-read{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.agent-compact-strip{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:4px;margin-bottom:8px}.agent-compact-stat{border:1px solid var(--border);background:var(--panel2);border-radius:7px;padding:5px 6px;min-width:0}.agent-compact-stat span{display:block;font-size:7px;color:var(--muted);margin-bottom:1px}.agent-compact-stat b{display:block;font-size:9px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+
 .terminal-page{position:fixed;inset:0;z-index:72;display:flex;flex-direction:column;background:#070a0f;color:#e6edf3}
 .terminal-body{flex:1;min-height:0;display:flex;flex-direction:column;background:#05070a}
 .terminal-toolbar{height:42px;display:flex;align-items:center;gap:9px;padding:0 12px;border-bottom:1px solid var(--border);background:var(--panel)}
@@ -414,26 +421,16 @@ button,input,textarea,select{font:inherit}button{cursor:pointer}.hidden{display:
   <div class="agent-page-body">
     <aside class="agent-side">
       <div class="agent-side-title">REMOTE WORKER</div>
-      <div class="agent-capability-grid">
+      <div class="agent-capability-grid" style="margin-bottom:8px">
         <div class="agent-capability"><span>Agent</span><b id="remoteWorkerCapability">Checking…</b></div>
         <div class="agent-capability"><span>Web browser</span><b id="browserCapability">Checking…</b></div>
       </div>
 
-      <div class="agent-side-title">LIVE VM</div>
-      <div class="agent-stat-grid">
-        <div class="agent-stat"><span>CPU / load</span><b id="workerCpu">—</b></div>
-        <div class="agent-stat"><span>RAM used</span><b id="workerRam">—</b></div>
-        <div class="agent-stat"><span>Disk used</span><b id="workerDisk">—</b></div>
-        <div class="agent-stat"><span>Queue</span><b id="workerQueue">—</b></div>
+      <div class="agent-chat-session-head">
+        <div class="agent-side-title">CHAT SESSIONS</div>
+        <button class="agent-secondary agent-chat-new" onclick="newVmChat()">＋ New</button>
       </div>
-
-      <div class="agent-side-title">LAST REMOTE RUN</div>
-      <div class="agent-stat-grid">
-        <div class="agent-stat"><span>Duration</span><b id="workerLastDuration">—</b></div>
-        <div class="agent-stat"><span>Tokens</span><b id="workerLastTokens">—</b></div>
-        <div class="agent-stat"><span>Model</span><b id="workerLastModel">—</b></div>
-        <div class="agent-stat"><span>Cost</span><b id="workerLastCost">—</b></div>
-      </div>
+      <div id="vmChatList" class="agent-chat-list"><div class="storage-empty">No VM chats yet.</div></div>
 
       <div class="agent-side-title">QUICK TASKS</div>
       <div class="agent-quick-grid">
@@ -448,20 +445,35 @@ button,input,textarea,select{font:inherit}button{cursor:pointer}.hidden{display:
       </div>
 
       <div class="agent-side-title">MISSIONS</div>
-      <div class="agent-side-hint">Queue longer work here. It keeps running on the VM even if you leave this page.</div>
       <div id="vmMissionList" class="agent-mission-list"><div class="storage-empty">No missions yet.</div></div>
 
+      <div class="agent-side-title">VM STATUS</div>
+      <div class="agent-compact-strip">
+        <div class="agent-compact-stat"><span>CPU / load</span><b id="workerCpu">—</b></div>
+        <div class="agent-compact-stat"><span>RAM used</span><b id="workerRam">—</b></div>
+        <div class="agent-compact-stat"><span>Disk used</span><b id="workerDisk">—</b></div>
+        <div class="agent-compact-stat"><span>Queue</span><b id="workerQueue">—</b></div>
+      </div>
+
+      <div class="agent-side-title">LAST RUN</div>
+      <div class="agent-compact-strip">
+        <div class="agent-compact-stat"><span>Duration</span><b id="workerLastDuration">—</b></div>
+        <div class="agent-compact-stat"><span>Tokens</span><b id="workerLastTokens">—</b></div>
+        <div class="agent-compact-stat"><span>Model</span><b id="workerLastModel">—</b></div>
+        <div class="agent-compact-stat"><span>Cost</span><b id="workerLastCost">—</b></div>
+      </div>
+
       <div class="agent-side-title">TASK STATS</div>
-      <div class="agent-stat-grid">
-        <div class="agent-stat"><span>Recent tasks</span><b id="vmTaskCount">0</b></div>
-        <div class="agent-stat"><span>Successful</span><b id="vmTaskSuccess">0</b></div>
-        <div class="agent-stat"><span>Last mode</span><b id="vmTaskLastMode">—</b></div>
-        <div class="agent-stat"><span>Last run</span><b id="vmTaskLastTime">—</b></div>
+      <div class="agent-compact-strip">
+        <div class="agent-compact-stat"><span>Recent</span><b id="vmTaskCount">0</b></div>
+        <div class="agent-compact-stat"><span>Success</span><b id="vmTaskSuccess">0</b></div>
+        <div class="agent-compact-stat"><span>Mode</span><b id="vmTaskLastMode">—</b></div>
+        <div class="agent-compact-stat"><span>Last run</span><b id="vmTaskLastTime">—</b></div>
       </div>
 
       <div class="agent-side-title">RECENT TASKS</div>
       <div id="vmAgentHistory" class="storage-list agent-history-list"><div class="storage-empty">No VM tasks yet.</div></div>
-      <div style="display:flex;gap:6px;margin-top:8px">
+      <div style="display:flex;gap:6px;margin-top:6px">
         <button class="agent-secondary" onclick="clearVmAgentHistory()">Clear history</button>
       </div>
     </aside>
@@ -866,15 +878,50 @@ async function loadVmChats(openRecent=false){
   }
 }
 
+function vmBrainLabel(provider){
+  return ({openrouter:"Goose",codex:"Codex",grok:"Grok",cursor:"Cursor"})[provider]||"Goose";
+}
+
+function vmChatRelativeTime(value){
+  const ts=Number(value);if(!Number.isFinite(ts)||ts<=0)return "never";
+  const delta=Math.max(0,Date.now()-ts),sec=Math.floor(delta/1000);
+  if(sec<45)return "just now";
+  const min=Math.floor(sec/60);if(min<60)return min+"m ago";
+  const hr=Math.floor(min/60);if(hr<24)return hr+"h ago";
+  const day=Math.floor(hr/24);if(day<7)return day+"d ago";
+  try{return new Date(ts).toLocaleDateString([], {month:"short",day:"numeric"})}catch{return ""}
+}
+
+function renderVmChatList(){
+  const list=document.getElementById("vmChatList");if(!list)return;
+  list.innerHTML="";
+  if(!vmChats.length){
+    const empty=document.createElement("div");empty.className="storage-empty";empty.textContent="No VM chats yet.";list.appendChild(empty);return;
+  }
+  const active=currentVmChat?.id||"";
+  vmChats.forEach(chat=>{
+    const row=document.createElement("button");row.type="button";row.className="agent-chat-row"+(chat.id===active?" active":"");
+    row.onclick=()=>openVmChat(chat.id);
+    const title=document.createElement("div");title.className="agent-chat-row-title";title.textContent=chat.title||"VM Chat";
+    const meta=document.createElement("div");meta.className="agent-chat-row-meta";
+    const brain=document.createElement("span");brain.className="agent-brain-badge";brain.textContent=vmBrainLabel(chat.provider);
+    const last=document.createElement("span");last.className="agent-chat-last-read";
+    const stamp=Number(chat.last_read_at||chat.updated_at||0);last.textContent="Last read "+vmChatRelativeTime(stamp);
+    if(stamp){try{last.title=new Date(stamp).toLocaleString()}catch{}}
+    meta.append(brain,last);row.append(title,meta);list.appendChild(row);
+  });
+}
+
 function renderVmChatSelect(){
   const select=document.getElementById("vmChatSelect");if(!select)return;
   const active=currentVmChat?.id||"";
   select.innerHTML='<option value="">New VM Chat</option>';
   vmChats.forEach(chat=>{
     const option=document.createElement("option");
-    option.value=chat.id;option.textContent=chat.title||"VM Chat";select.appendChild(option);
+    option.value=chat.id;option.textContent=(chat.title||"VM Chat")+" · "+vmBrainLabel(chat.provider);select.appendChild(option);
   });
   select.value=vmChats.some(x=>x.id===active)?active:"";
+  renderVmChatList();
 }
 
 async function vmChatSelectChanged(){
@@ -893,6 +940,10 @@ async function openVmChat(id){
     if(currentVmChat){
       document.getElementById("vmAgentMode").value=currentVmChat.mode||"read";
       document.getElementById("vmAgentWeb").checked=!!Number(currentVmChat.web);
+      const brain=document.getElementById("vmAgentProvider");
+      if(brain&&currentVmChat.provider&&[...brain.options].some(o=>o.value===currentVmChat.provider&&!o.disabled))brain.value=currentVmChat.provider;
+      const i=vmChats.findIndex(x=>x.id===currentVmChat.id);
+      if(i>=0)vmChats[i]={...vmChats[i],...currentVmChat};
     }
     renderVmChatSelect();renderVmAgentConversation();
     refreshVmTaskStatus().catch(()=>{});
@@ -909,12 +960,12 @@ function newVmChat(){
   input?.focus();
 }
 
-async function ensureVmChat(firstPrompt,mode,web){
+async function ensureVmChat(firstPrompt,mode,web,provider){
   if(currentVmChat)return currentVmChat;
   const title=String(firstPrompt||"New VM Chat").replace(/\s+/g," ").trim().slice(0,58)||"New VM Chat";
   const d=await api("/vm-agent/chats",{
     method:"POST",headers:{"Content-Type":"application/json"},
-    body:JSON.stringify({title,mode,web})
+    body:JSON.stringify({title,mode,web,provider})
   });
   currentVmChat=d.chat;
   await loadVmChats(false);
@@ -922,11 +973,11 @@ async function ensureVmChat(firstPrompt,mode,web){
   return currentVmChat;
 }
 
-async function saveVmChatMessage(role,content,mode,web,error=false){
+async function saveVmChatMessage(role,content,mode,web,error=false,provider="openrouter"){
   if(!currentVmChat)return null;
   const d=await api("/vm-agent/chats/"+encodeURIComponent(currentVmChat.id)+"/messages",{
     method:"POST",headers:{"Content-Type":"application/json"},
-    body:JSON.stringify({role,content,mode,web,error})
+    body:JSON.stringify({role,content,mode,web,error,provider})
   });
   return d.message||null;
 }
@@ -1102,8 +1153,8 @@ async function runVmAgentTask(){
   let finalData=null,streamFailure=null,pending=null;
 
   try{
-    await ensureVmChat(prompt,mode,web);
-    const savedUser=await saveVmChatMessage("user",prompt,mode,web,false);
+    await ensureVmChat(prompt,mode,web,provider);
+    const savedUser=await saveVmChatMessage("user",prompt,mode,web,false,provider);
     vmAgentMessages.push({
       id:savedUser?.id||null,role:"user",text:prompt,at:savedUser?.created_at||Date.now(),mode,web,error:false
     });
@@ -1153,12 +1204,17 @@ async function runVmAgentTask(){
 
     pending?.remove();
     removeRecoveredVmPending();
-    const savedAssistant=await saveVmChatMessage("assistant",result,mode,web,false);
+    const savedAssistant=await saveVmChatMessage("assistant",result,mode,web,false,provider);
     vmAgentMessages.push({
       id:savedAssistant?.id||null,role:"assistant",text:result,at:savedAssistant?.created_at||Date.now(),mode,web,error:false
     });
     renderVmAgentConversation();
     await loadVmChats(false);
+    if(currentVmChat){
+      const fresh=vmChats.find(x=>x.id===currentVmChat.id);
+      if(fresh)currentVmChat={...currentVmChat,...fresh};
+      renderVmChatSelect();
+    }
 
     const t=finalData.tokens||{};
     const measured=Number(finalData.duration_seconds);
@@ -1185,7 +1241,7 @@ async function runVmAgentTask(){
     const text="I couldn't complete that request. "+message;
     if(currentVmChat){
       try{
-        const saved=await saveVmChatMessage("assistant",text,mode,web,true);
+        const saved=await saveVmChatMessage("assistant",text,mode,web,true,provider);
         vmAgentMessages.push({id:saved?.id||null,role:"assistant",text,at:saved?.created_at||Date.now(),mode,web,error:true});
       }catch{
         vmAgentMessages.push({role:"assistant",text,at:Date.now(),mode,web,error:true});
