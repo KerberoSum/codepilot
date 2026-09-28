@@ -489,7 +489,8 @@ button,input,textarea,select{font:inherit}button{cursor:pointer}.hidden{display:
           <select id="vmAgentProvider" title="Choose which AI handles this VM Agent request">
             <option value="openrouter">OpenRouter / Goose</option>
             <option value="codex" disabled>OpenAI Codex · setup needed</option>
-            <option value="grok" disabled>Grok · setup needed</option>
+            <option value="grok" disabled>Grok Build · setup needed</option>
+            <option value="cursor" disabled>Cursor Agent · setup needed</option>
           </select>
           <label class="agent-toggle" title="Allow this conversation or mission to browse public websites">
             <input id="vmAgentWeb" type="checkbox">
@@ -1074,12 +1075,12 @@ function parseSseChunk(buffer,onEvent){
   return buffer;
 }
 
-async function vmAgentPostJson(prompt,mode,provider="openrouter",web=false,chatId=""){
+async function vmAgentPostJson(prompt,contextPrompt,mode,provider="openrouter",web=false,chatId=""){
   return await api("/vm-agent/task",{
     method:"POST",
     headers:{"Content-Type":"application/json"},
     signal:AbortSignal.timeout(305000),
-    body:JSON.stringify({prompt,mode,provider,web,chatId})
+    body:JSON.stringify({prompt,contextPrompt,mode,provider,web,chatId})
   });
 }
 
@@ -1093,7 +1094,7 @@ async function runVmAgentTask(){
   const prompt=input.value.trim();
   if(!prompt||button.disabled)return;
 
-  const fullPrompt=buildVmAgentPrompt(prompt);
+  const contextPrompt=buildVmAgentPrompt(prompt);
   button.disabled=true;
   input.value="";
   meta.textContent="Queueing with Remote Worker…";
@@ -1114,7 +1115,7 @@ async function runVmAgentTask(){
       if(authToken)headers.set("Authorization","Bearer "+authToken);
       const r=await fetch(API_BASE_URL+"/vm-agent/task/stream",{
         method:"POST",headers,signal:AbortSignal.timeout(305000),
-        body:JSON.stringify({prompt:fullPrompt,mode,provider,web,chatId:currentVmChat?.id||""})
+        body:JSON.stringify({prompt,contextPrompt,mode,provider,web,chatId:currentVmChat?.id||""})
       });
       if(r.status===401){clearAuthToken();showLogin();throw new Error("Your CodePilot session expired. Please sign in again.")}
       if(!r.ok){
@@ -1143,7 +1144,7 @@ async function runVmAgentTask(){
       if(e?.noFallback)throw e;
       streamFailure=e;
       meta.textContent="Stream interrupted — retrying normally…";
-      finalData=await vmAgentPostJson(fullPrompt,mode,provider,web,currentVmChat?.id||"");
+      finalData=await vmAgentPostJson(prompt,contextPrompt,mode,provider,web,currentVmChat?.id||"");
     }
 
     if(finalData?.ok===false||finalData?.error)throw new Error(finalData.error||"VM Agent task failed.");
@@ -1166,6 +1167,10 @@ async function runVmAgentTask(){
     if(streamFailure)runBits.push("recovered after stream retry");
     if(t.total!=null)runBits.push(formatTokens(t.total)+" tokens");
     if(finalData.cost_usd!=null)runBits.push(formatVmCost(finalData.cost_usd));
+    if(finalData.native_session?.id){
+      const label=provider==="codex"?"Codex":provider==="grok"?"Grok":provider==="cursor"?"Cursor":"native";
+      runBits.push((finalData.native_session.resumed?"resumed ":"new ")+label+" session");
+    }
     meta.textContent=runBits.join(" · ");
     setVmAgentStatus("online","Connected");
     renderVmLastRun({
@@ -1329,7 +1334,8 @@ async function loadVmCapabilities(){
         const info=providers[option.value];
         if(option.value==="openrouter"){option.disabled=false;option.textContent="OpenRouter / Goose";return;}
         option.disabled=!(d.providerRouting===true&&info&&info.available);
-        option.textContent=option.value==="codex"?"OpenAI Codex"+(option.disabled?" · setup needed":""):"Grok"+(option.disabled?" · setup needed":"");
+        const labels={codex:"OpenAI Codex",grok:"Grok Build",cursor:"Cursor Agent"};
+        option.textContent=(labels[option.value]||option.value)+(option.disabled?" · setup needed":"");
       });
       if(providerSelect.selectedOptions[0]?.disabled)providerSelect.value="openrouter";
     }
