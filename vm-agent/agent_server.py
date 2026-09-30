@@ -392,7 +392,7 @@ def provider_command(req: TaskRequest, full_prompt: str, session_id: Optional[st
     elif req.provider == "cursor":
         command = [
             CURSOR_BIN, "--print", "--output-format", "json", "--trust",
-            "--sandbox", "enabled", "--workspace", str(WORKSPACE),
+            "--sandbox", "disabled", "--workspace", str(WORKSPACE),
         ]
         if req.mode == "read":
             command.extend(["--mode", "ask"])
