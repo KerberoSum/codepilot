@@ -497,10 +497,11 @@ body.auth-locked #authModal{display:grid!important;background:var(--bg)}
           </select>
           <label for="vmAgentProvider" style="font-size:9px;color:var(--muted)">Brain</label>
           <select id="vmAgentProvider" title="Choose which AI handles this VM Agent request" onchange="vmAgentProviderChanged()">
-            <option value="chatgpt">ChatGPT / OpenAI</option>
-            <option value="codex">OpenAI Codex · Work credits</option>
+            <option value="chatgpt_desktop">ChatGPT Desktop · Chat</option>
+            <option value="chatgpt">Goose · ChatGPT Codex</option>
+            <option value="codex">Codex CLI · credits</option>
             <option value="cursor">Cursor Agent</option>
-            <option value="openrouter">OpenRouter / Goose</option>
+            <option value="openrouter">Goose · OpenRouter</option>
             <option value="grok">Grok</option>
             <option value="gemini">Gemini</option>
           </select>
@@ -873,10 +874,14 @@ function vmAgentProvider(){return document.getElementById("vmAgentProvider")?.va
 function vmAgentProviderChanged(){
   const meta=document.getElementById("vmAgentMeta");
   if(!meta)return;
-  if(vmAgentProvider()==="chatgpt"){
-    meta.textContent="ChatGPT / OpenAI runs through Goose using the VM's ChatGPT/OpenAI authentication.";
+  if(vmAgentProvider()==="chatgpt_desktop"){
+    meta.textContent="Normal ChatGPT Chat is a separate desktop/web experience. No supported VM bridge is connected yet.";
+  }else if(vmAgentProvider()==="chatgpt"){
+    meta.textContent="Goose is the agent. Its model provider is ChatGPT Codex via your ChatGPT-plan OAuth; this is not normal ChatGPT Chat.";
   }else if(vmAgentProvider()==="codex"){
-    meta.textContent="Codex uses ChatGPT Work/Codex credits · token usage will be shown after each run.";
+    meta.textContent="Codex CLI uses the Codex usage/credit pool · token usage will be shown after each run.";
+  }else if(vmAgentProvider()==="openrouter"){
+    meta.textContent="Goose is the agent and OpenRouter supplies the model.";
   }else if(!currentVmChat){
     meta.textContent="";
   }
@@ -950,7 +955,7 @@ async function loadVmChats(openRecent=false){
 }
 
 function vmBrainLabel(provider){
-  return ({chatgpt:"ChatGPT",openrouter:"OpenRouter",gemini:"Gemini",codex:"Codex",grok:"Grok",cursor:"Cursor"})[provider]||provider||"AI";
+  return ({chatgpt_desktop:"ChatGPT Chat",chatgpt:"Goose · Codex",openrouter:"Goose · OpenRouter",gemini:"Gemini",codex:"Codex CLI",grok:"Grok",cursor:"Cursor"})[provider]||provider||"AI";
 }
 
 function vmChatRelativeTime(value){
@@ -1233,8 +1238,12 @@ async function runVmAgentTask(){
   button.disabled=true;
   input.value="";
   meta.textContent=provider==="codex"
-    ?"Codex uses Work credits · running now · token usage will be shown when complete…"
-    :"Queueing with Remote Worker…";
+    ?"Codex CLI · credits · running now · token usage will be shown when complete…"
+    :provider==="chatgpt"
+      ?"Goose · ChatGPT Codex · running now…"
+      :provider==="openrouter"
+        ?"Goose · OpenRouter · running now…"
+        :"Queueing with Remote Worker…";
   const started=performance.now();
   let finalData=null,streamFailure=null,pending=null;
 
@@ -1523,19 +1532,26 @@ async function loadVmCapabilities(){
         const info=providers[option.value];
         const ready=d.providerRouting===true&&info&&info.available;
         const labels={
-          chatgpt:"ChatGPT / OpenAI",
-          codex:"OpenAI Codex · Work credits",
+          chatgpt_desktop:"ChatGPT Desktop · Chat",
+          chatgpt:"Goose · ChatGPT Codex",
+          codex:"Codex CLI · credits",
           cursor:"Cursor Agent",
-          openrouter:legacyGoose?"Goose / OpenAI · legacy":"OpenRouter / Goose",
+          openrouter:legacyGoose?"Goose · legacy provider":"Goose · OpenRouter",
           grok:"Grok",
           gemini:"Gemini"
         };
         option.disabled=!ready;
         const suffix=ready?"":(info?.needs_auth?" · sign in needed":" · unavailable");
-        option.textContent=(info?.label||labels[option.value]||option.value)+suffix;
-        option.title=option.value==="codex"
-          ?"Codex uses your ChatGPT Work/Codex credit allowance. Token usage is shown after each run."
-          :(ready?"Ready on the VM.":(info?.needs_auth?"One-time OAuth sign-in is required on the VM.":"This brain is listed but the installed VM Agent has not enabled it yet."));
+        option.textContent=(labels[option.value]||info?.label||option.value)+suffix;
+        option.title=option.value==="chatgpt_desktop"
+          ?"Normal ChatGPT Chat is separate from Goose and Codex. This VM does not currently expose a supported Chat bridge."
+          :option.value==="chatgpt"
+            ?"Goose agent using the ChatGPT Codex provider through your ChatGPT-plan OAuth. This is not normal ChatGPT Chat."
+            :option.value==="codex"
+              ?"Codex CLI uses the Codex usage/credit pool. Token usage is shown after each run."
+              :option.value==="openrouter"
+                ?"Goose agent using OpenRouter as its model provider."
+                :(ready?"Ready on the VM.":(info?.needs_auth?"One-time OAuth sign-in is required on the VM.":"This brain is listed but the installed VM Agent has not enabled it yet."));
       });
       if(providerSelect.selectedOptions[0]?.disabled){
         const firstReady=[...providerSelect.options].find(option=>!option.disabled);
