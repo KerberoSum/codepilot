@@ -1459,7 +1459,8 @@ function renderVmLastRun(run){
   if(duration)duration.textContent=run.duration_seconds!=null?formatVmTaskElapsed(run.duration_seconds):"—";
   if(tokens)tokens.textContent=run.tokens?.total!=null?formatTokens(run.tokens.total):"—";
   if(model){
-    const requested=inference.requestedModel||run.model||"—";
+    const rawRequested=inference.requestedModel||run.model||"—";
+    const requested=rawRequested==="ChatGPT / OpenAI"?"Goose · ChatGPT Codex":rawRequested==="OpenAI Codex"?"Codex CLI":rawRequested;
     model.textContent=requested;
     model.title=inference.provider?("Provider: "+inference.provider):requested;
   }
