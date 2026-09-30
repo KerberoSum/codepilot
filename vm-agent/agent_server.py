@@ -314,13 +314,13 @@ def goose_command(full_prompt: str, provider: str = "chatgpt"):
 
 def provider_model_name(req: TaskRequest) -> str:
     if req.provider == "chatgpt":
-        return "ChatGPT / OpenAI"
+        return "Goose · ChatGPT Codex"
     if req.provider == "openrouter":
         return os.environ.get("GOOSE_OPENROUTER_MODEL", "openrouter/free")
     if req.provider == "gemini":
         return "Gemini"
     if req.provider == "codex":
-        return "OpenAI Codex"
+        return "Codex CLI"
     if req.provider == "grok":
         return "Grok"
     if req.provider == "cursor":
