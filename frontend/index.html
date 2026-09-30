@@ -170,6 +170,7 @@ body.auth-locked #authModal{display:grid!important;background:var(--bg)}
 .agent-chat-row-title{font-size:9px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-bottom:4px}
 .agent-chat-row-meta{display:flex;align-items:center;gap:5px;color:var(--muted);font-size:7px;min-width:0}.agent-brain-badge{border:1px solid var(--border);border-radius:999px;padding:2px 5px;color:#d9e0e9;background:var(--panel3);white-space:nowrap}.agent-chat-last-read{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .agent-compact-strip{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:4px;margin-bottom:8px}.agent-compact-stat{border:1px solid var(--border);background:var(--panel2);border-radius:7px;padding:5px 6px;min-width:0}.agent-compact-stat span{display:block;font-size:7px;color:var(--muted);margin-bottom:1px}.agent-compact-stat b{display:block;font-size:9px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.agent-system{border:1px solid var(--border);border-radius:8px;background:var(--panel2);margin:7px 0 8px;overflow:hidden}.agent-system-head{display:flex;align-items:center;justify-content:space-between;gap:6px;padding:5px 6px;border-bottom:1px solid var(--border2)}.agent-system-head strong{font-size:8px;letter-spacing:.75px;color:var(--muted)}.agent-system-actions{display:flex;gap:4px}.agent-system-btn{border:1px solid var(--border);background:var(--panel3);color:var(--muted);border-radius:5px;padding:3px 5px;font-size:7px}.agent-system-btn:hover{color:#fff}.agent-system-metrics{display:flex;flex-wrap:wrap;gap:4px;padding:5px}.agent-system-chip{display:flex;align-items:center;gap:4px;min-width:0;border:1px solid var(--border2);background:#0d131d;border-radius:6px;padding:3px 5px}.agent-system-chip span{font-size:7px;color:var(--muted);white-space:nowrap}.agent-system-chip b{font-size:8px;color:#fff;white-space:nowrap;max-width:90px;overflow:hidden;text-overflow:ellipsis}.agent-system-chip b.ready{color:var(--green)}.agent-system-chip b.warn{color:var(--yellow)}.agent-system-chip b.offline{color:var(--red)}.agent-system-settings{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:3px;padding:6px;border-top:1px solid var(--border2);background:var(--panel)}.agent-system-settings label{display:flex;align-items:center;gap:4px;font-size:7px;color:var(--muted);white-space:nowrap}.agent-system-settings input{accent-color:var(--accent)}
 
 .terminal-page{position:fixed;inset:0;z-index:72;display:flex;flex-direction:column;background:#070a0f;color:#e6edf3}
 .terminal-body{flex:1;min-height:0;display:flex;flex-direction:column;background:#05070a}
@@ -215,7 +216,7 @@ body.auth-locked #authModal{display:grid!important;background:var(--bg)}
 
   <div class="sidebar-tabs">
     <button id="explorerTab" class="sidebar-tab active" onclick="switchChatContext('project')">Explorer</button>
-    <button id="chatsTab" class="sidebar-tab" onclick="switchChatContext('standalone')">Chats</button>
+    <button id="chatsTab" class="sidebar-tab" onclick="switchChatContext('standalone')">Random</button>
   </div>
 
   <div id="explorerPane" class="sidebar-pane">
@@ -254,8 +255,8 @@ body.auth-locked #authModal{display:grid!important;background:var(--bg)}
 
   <div id="chatsPane" class="sidebar-pane hidden">
     <div class="section-head">
-      <span>STANDALONE CHATS</span>
-      <button class="icon-btn" onclick="newStandaloneChat()" title="New standalone chat">＋</button>
+      <span>RANDOM CHATS</span>
+      <button class="icon-btn" onclick="newStandaloneChat()" title="New random chat">＋</button>
     </div>
     <div id="leftChatList" class="files">
       <div style="padding:14px;color:var(--muted2);font-size:11px">No chat sessions yet.</div>
@@ -344,7 +345,7 @@ body.auth-locked #authModal{display:grid!important;background:var(--bg)}
       <div class="composer-bottom">
         <div class="context-switch" aria-label="Chat context">
           <button id="quickProjectButton" class="context-btn active" onclick="switchChatContext('project')" title="Project chats">Explorer</button>
-          <button id="quickStandaloneButton" class="context-btn" onclick="switchChatContext('standalone')" title="Standalone chats">Chats</button>
+          <button id="quickStandaloneButton" class="context-btn" onclick="switchChatContext('standalone')" title="Random chats without a project">Random</button>
         </div>
         <button id="attachButton" class="attach-btn" onclick="document.getElementById('attachmentInput').click()" title="Attach temporary source files for this message">Attach</button>
         <input id="attachmentInput" class="hidden" type="file" multiple accept=".html,.htm,.css,.js,.mjs,.cjs,.ts,.jsx,.tsx,.json,.md,.txt,.py,.sql,.xml,.yaml,.yml,.csv" onchange="handleAttachmentFiles(event)">
@@ -422,12 +423,6 @@ body.auth-locked #authModal{display:grid!important;background:var(--bg)}
 
   <div class="agent-page-body">
     <aside class="agent-side">
-      <div class="agent-side-title">REMOTE WORKER</div>
-      <div class="agent-capability-grid" style="margin-bottom:8px">
-        <div class="agent-capability"><span>Agent</span><b id="remoteWorkerCapability">Checking…</b></div>
-        <div class="agent-capability"><span>Web browser</span><b id="browserCapability">Checking…</b></div>
-      </div>
-
       <div class="agent-chat-session-head">
         <div class="agent-side-title">CHAT SESSIONS</div>
         <button class="agent-secondary agent-chat-new" onclick="newVmChat()">＋ New</button>
@@ -446,28 +441,48 @@ body.auth-locked #authModal{display:grid!important;background:var(--bg)}
         <button class="agent-quick" onclick="setVmAgentPreset('Open the URL I give you next, inspect the rendered page, follow relevant links if needed, and summarize what you find.','read',true)">Inspect website</button>
       </div>
 
-      <div class="agent-side-title">VM STATUS</div>
-      <div class="agent-compact-strip">
-        <div class="agent-compact-stat"><span>CPU / load</span><b id="workerCpu">—</b></div>
-        <div class="agent-compact-stat"><span>RAM used</span><b id="workerRam">—</b></div>
-        <div class="agent-compact-stat"><span>Disk used</span><b id="workerDisk">—</b></div>
-        <div class="agent-compact-stat"><span>Queue</span><b id="workerQueue">—</b></div>
-      </div>
-
-      <div class="agent-side-title">LAST RUN</div>
-      <div class="agent-compact-strip">
-        <div class="agent-compact-stat"><span>Duration</span><b id="workerLastDuration">—</b></div>
-        <div class="agent-compact-stat"><span>Tokens</span><b id="workerLastTokens">—</b></div>
-        <div class="agent-compact-stat"><span>Model</span><b id="workerLastModel">—</b></div>
-        <div class="agent-compact-stat"><span>Cost</span><b id="workerLastCost">—</b></div>
-      </div>
-
-      <div class="agent-side-title">TASK STATS</div>
-      <div class="agent-compact-strip">
-        <div class="agent-compact-stat"><span>Recent</span><b id="vmTaskCount">0</b></div>
-        <div class="agent-compact-stat"><span>Success</span><b id="vmTaskSuccess">0</b></div>
-        <div class="agent-compact-stat"><span>Mode</span><b id="vmTaskLastMode">—</b></div>
-        <div class="agent-compact-stat"><span>Last run</span><b id="vmTaskLastTime">—</b></div>
+      <div class="agent-system">
+        <div class="agent-system-head">
+          <strong>SYSTEM</strong>
+          <div class="agent-system-actions">
+            <button id="vmSystemVisibilityButton" class="agent-system-btn" onclick="toggleVmSystemPanel()">Hide</button>
+            <button class="agent-system-btn" onclick="toggleVmSystemSettings()">Display ▾</button>
+          </div>
+        </div>
+        <div id="vmSystemBody">
+          <div id="vmSystemMetrics" class="agent-system-metrics">
+            <div class="agent-system-chip" data-vm-metric="agent"><span>Agent</span><b id="remoteWorkerCapability">Checking…</b></div>
+            <div class="agent-system-chip" data-vm-metric="browser"><span>Web</span><b id="browserCapability">Checking…</b></div>
+            <div class="agent-system-chip" data-vm-metric="cpu"><span>CPU</span><b id="workerCpu">—</b></div>
+            <div class="agent-system-chip" data-vm-metric="ram"><span>RAM</span><b id="workerRam">—</b></div>
+            <div class="agent-system-chip" data-vm-metric="disk"><span>Disk</span><b id="workerDisk">—</b></div>
+            <div class="agent-system-chip" data-vm-metric="queue"><span>Queue</span><b id="workerQueue">—</b></div>
+            <div class="agent-system-chip" data-vm-metric="duration"><span>Duration</span><b id="workerLastDuration">—</b></div>
+            <div class="agent-system-chip" data-vm-metric="tokens"><span>Tokens</span><b id="workerLastTokens">—</b></div>
+            <div class="agent-system-chip" data-vm-metric="model"><span>Model</span><b id="workerLastModel">—</b></div>
+            <div class="agent-system-chip" data-vm-metric="cost"><span>Cost</span><b id="workerLastCost">—</b></div>
+            <div class="agent-system-chip" data-vm-metric="recent"><span>Recent</span><b id="vmTaskCount">0</b></div>
+            <div class="agent-system-chip" data-vm-metric="success"><span>Success</span><b id="vmTaskSuccess">0</b></div>
+            <div class="agent-system-chip" data-vm-metric="mode"><span>Mode</span><b id="vmTaskLastMode">—</b></div>
+            <div class="agent-system-chip" data-vm-metric="last"><span>Last run</span><b id="vmTaskLastTime">—</b></div>
+          </div>
+        </div>
+        <div id="vmSystemSettings" class="agent-system-settings hidden">
+          <label><input type="checkbox" data-vm-system-toggle="agent" onchange="saveVmSystemPrefs()">Agent</label>
+          <label><input type="checkbox" data-vm-system-toggle="browser" onchange="saveVmSystemPrefs()">Web</label>
+          <label><input type="checkbox" data-vm-system-toggle="cpu" onchange="saveVmSystemPrefs()">CPU</label>
+          <label><input type="checkbox" data-vm-system-toggle="ram" onchange="saveVmSystemPrefs()">RAM</label>
+          <label><input type="checkbox" data-vm-system-toggle="disk" onchange="saveVmSystemPrefs()">Disk</label>
+          <label><input type="checkbox" data-vm-system-toggle="queue" onchange="saveVmSystemPrefs()">Queue</label>
+          <label><input type="checkbox" data-vm-system-toggle="duration" onchange="saveVmSystemPrefs()">Duration</label>
+          <label><input type="checkbox" data-vm-system-toggle="tokens" onchange="saveVmSystemPrefs()">Tokens</label>
+          <label><input type="checkbox" data-vm-system-toggle="model" onchange="saveVmSystemPrefs()">Model</label>
+          <label><input type="checkbox" data-vm-system-toggle="cost" onchange="saveVmSystemPrefs()">Cost</label>
+          <label><input type="checkbox" data-vm-system-toggle="recent" onchange="saveVmSystemPrefs()">Recent</label>
+          <label><input type="checkbox" data-vm-system-toggle="success" onchange="saveVmSystemPrefs()">Success</label>
+          <label><input type="checkbox" data-vm-system-toggle="mode" onchange="saveVmSystemPrefs()">Mode</label>
+          <label><input type="checkbox" data-vm-system-toggle="last" onchange="saveVmSystemPrefs()">Last run</label>
+        </div>
       </div>
 
       <div class="agent-side-title">RECENT TASKS</div>
@@ -649,6 +664,9 @@ const ATTACH_MAX_FILES=5;
 const ATTACH_MAX_FILE_BYTES=500*1024;
 const ATTACH_MAX_TOTAL_BYTES=1024*1024;
 const ATTACH_ALLOWED_EXT=new Set(["html","htm","css","js","mjs","cjs","ts","jsx","tsx","json","md","txt","py","sql","xml","yaml","yml","csv"]);
+const VM_SYSTEM_PREFS_KEY="codepilot-vm-system-prefs-v1";
+const VM_SYSTEM_METRICS=["agent","browser","cpu","ram","disk","queue","duration","tokens","model","cost","recent","success","mode","last"];
+const VM_SYSTEM_DEFAULT_METRICS=["agent","browser","cpu","ram","disk","queue"];
 
 /* =========================================================
    START
@@ -658,6 +676,7 @@ document.addEventListener("DOMContentLoaded", bootstrap);
 async function bootstrap(){
   setupResizers();
   loadAccessibilitySettings();
+  loadVmSystemPrefs();
   try{authToken=sessionStorage.getItem("codepilot-auth-token")||""}catch{}
   if(authToken){
     try{
@@ -1398,6 +1417,47 @@ function formatWorkerBytes(value){
   return (x>=10||i===0?x.toFixed(0):x.toFixed(1))+" "+units[i];
 }
 
+function readVmSystemPrefs(){
+  const fallback={visible:true,metrics:[...VM_SYSTEM_DEFAULT_METRICS]};
+  try{
+    const raw=localStorage.getItem(VM_SYSTEM_PREFS_KEY);
+    if(!raw)return fallback;
+    const parsed=JSON.parse(raw)||{};
+    const metrics=Array.isArray(parsed.metrics)?parsed.metrics.filter(x=>VM_SYSTEM_METRICS.includes(x)):fallback.metrics;
+    return {visible:parsed.visible!==false,metrics};
+  }catch{return fallback}
+}
+
+function applyVmSystemPrefs(prefs=readVmSystemPrefs()){
+  const body=document.getElementById("vmSystemBody"),button=document.getElementById("vmSystemVisibilityButton");
+  body?.classList.toggle("hidden",!prefs.visible);
+  if(button)button.textContent=prefs.visible?"Hide":"Show";
+  document.querySelectorAll("[data-vm-metric]").forEach(el=>el.classList.toggle("hidden",!prefs.metrics.includes(el.dataset.vmMetric)));
+  document.querySelectorAll("[data-vm-system-toggle]").forEach(input=>{input.checked=prefs.metrics.includes(input.dataset.vmSystemToggle)});
+}
+
+function writeVmSystemPrefs(prefs){
+  try{localStorage.setItem(VM_SYSTEM_PREFS_KEY,JSON.stringify(prefs))}catch{}
+  applyVmSystemPrefs(prefs);
+}
+
+function loadVmSystemPrefs(){applyVmSystemPrefs(readVmSystemPrefs());}
+
+function toggleVmSystemPanel(){
+  const prefs=readVmSystemPrefs();prefs.visible=!prefs.visible;writeVmSystemPrefs(prefs);
+  if(!prefs.visible)document.getElementById("vmSystemSettings")?.classList.add("hidden");
+}
+
+function toggleVmSystemSettings(){
+  document.getElementById("vmSystemSettings")?.classList.toggle("hidden");
+}
+
+function saveVmSystemPrefs(){
+  const prefs=readVmSystemPrefs();
+  prefs.metrics=[...document.querySelectorAll("[data-vm-system-toggle]:checked")].map(input=>input.dataset.vmSystemToggle).filter(x=>VM_SYSTEM_METRICS.includes(x));
+  writeVmSystemPrefs(prefs);
+}
+
 function toggleAgentPanel(force){
   const panel=document.querySelector(".agent-side");if(!panel)return;
   const open=typeof force==="boolean"?force:!panel.classList.contains("mobile-open");
@@ -1862,7 +1922,7 @@ function contextChats(){
 }
 function renderChatSelect(){
   const s=document.getElementById("chatSelect");const id=currentChat?.id||"";const list=contextChats();
-  s.innerHTML='<option value="">'+(chatContext==="project"?'New Project Chat':'New Standalone Chat')+'</option>';
+  s.innerHTML='<option value="">'+(chatContext==="project"?'New Project Chat':'New Random Chat')+'</option>';
   list.forEach(c=>{const o=document.createElement("option");o.value=c.id;o.textContent=c.title||"New Chat";s.appendChild(o);});
   s.value=list.some(c=>c.id===id)?id:"";renderLeftChats();renderProjectChats();updateContextUI();
 }
@@ -1878,7 +1938,7 @@ function createChatRow(chat){
 function renderLeftChats(){
   const list=document.getElementById("leftChatList");if(!list)return;list.innerHTML="";
   const standalone=chats.filter(c=>!c.project_id);
-  if(!standalone.length){list.innerHTML='<div style="padding:14px;color:var(--muted2);font-size:11px;line-height:1.5">No standalone chats yet.<br>Start one with the ＋ button.</div>';return;}
+  if(!standalone.length){list.innerHTML='<div style="padding:14px;color:var(--muted2);font-size:11px;line-height:1.5">No random chats yet.<br>Start one with the ＋ button.</div>';return;}
   standalone.forEach(chat=>list.appendChild(createChatRow(chat)));
 }
 function renderProjectChats(){
@@ -1911,7 +1971,8 @@ function updateContextUI(){
   const project=chatContext==="project";
   document.getElementById("explorerTab")?.classList.toggle("active",project);document.getElementById("chatsTab")?.classList.toggle("active",!project);
   document.getElementById("quickProjectButton")?.classList.toggle("active",project);document.getElementById("quickStandaloneButton")?.classList.toggle("active",!project);
-  const label=document.getElementById("aiProjectLabel");if(label)label.textContent=project?(currentProject?.name||"No project attached"):"Standalone chat";
+  const label=document.getElementById("aiProjectLabel");if(label)label.textContent=project?(currentProject?.name||"No project attached"):"Random chat";
+  const prompt=document.getElementById("prompt");if(prompt)prompt.placeholder=project?"Ask CodePilot about this project...":"Ask anything — no project attached...";
 }
 async function renameChat(){
   if(!currentChat)return alert("Open an existing chat first.");
