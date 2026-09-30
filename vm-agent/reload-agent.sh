@@ -11,6 +11,8 @@ AGENT_DIR="/srv/codepilot-agent"
 GOOSE_CFG="$AGENT_DIR/.config/goose"
 
 install -m 0644 "$SCRIPT_DIR/agent_server.py" "$AGENT_DIR/agent_server.py"
+install -m 0644 "$SCRIPT_DIR/chatgpt_desktop_bridge.py" "$AGENT_DIR/chatgpt_desktop_bridge.py"
+install -m 0755 -o ubuntu -g ubuntu "$SCRIPT_DIR/chatgpt-vm-launcher.sh" /home/ubuntu/bin/chatgpt-vm
 
 # Ubuntu 24.04 may block Bubblewrap user namespaces through AppArmor.
 # Give only /usr/bin/bwrap the userns permission Goose needs.
