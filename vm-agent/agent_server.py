@@ -179,20 +179,30 @@ def provider_capabilities() -> dict:
             return False
 
     return {
+        "chatgpt_desktop": {
+            "label": "ChatGPT Desktop · Chat",
+            "available": False,
+            "default": False,
+            "persistent": True,
+            "runner": "ChatGPT Desktop",
+            "reason": "Normal ChatGPT Chat is separate from Goose/Codex and no supported VM chat bridge is connected.",
+        },
         "chatgpt": {
-            "label": "ChatGPT / OpenAI",
+            "label": "Goose · ChatGPT Codex",
             "available": goose and oauth_ready("chatgpt_codex"),
             "default": True,
             "persistent": False,
             "runner": "Goose",
+            "usage_pool": "ChatGPT Codex",
             "needs_auth": not oauth_ready("chatgpt_codex"),
         },
         "openrouter": {
-            "label": "OpenRouter / Goose",
+            "label": "Goose · OpenRouter",
             "available": goose,
             "default": False,
             "persistent": False,
             "runner": "Goose",
+            "usage_pool": "OpenRouter",
         },
         "gemini": {
             "label": "Gemini",
@@ -202,7 +212,7 @@ def provider_capabilities() -> dict:
             "runner": "Goose",
             "needs_auth": not oauth_ready("gemini_oauth"),
         },
-        "codex": {"label": "OpenAI Codex", "available": bool(command_path(CODEX_BIN)), "default": False, "persistent": True},
+        "codex": {"label": "Codex CLI · credits", "available": bool(command_path(CODEX_BIN)), "default": False, "persistent": True, "usage_pool": "Codex"},
         "grok": {"label": "Grok", "available": bool(command_path(GROK_BIN)), "default": False, "persistent": True},
         "cursor": {"label": "Cursor Agent", "available": bool(command_path(CURSOR_BIN)), "default": False, "persistent": True},
     }
