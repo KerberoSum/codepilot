@@ -170,13 +170,22 @@ def browser_capability() -> dict:
 def provider_capabilities() -> dict:
     goose = bool(command_path(GOOSE_BIN))
     goose_config = Path.home() / ".config" / "goose"
+
+    def oauth_ready(provider: str) -> bool:
+        token_file = goose_config / provider / "tokens.json"
+        try:
+            return token_file.is_file() and token_file.stat().st_size > 0
+        except OSError:
+            return False
+
     return {
         "chatgpt": {
             "label": "ChatGPT / OpenAI",
-            "available": goose and (goose_config / "chatgpt_codex").exists(),
+            "available": goose and oauth_ready("chatgpt_codex"),
             "default": True,
             "persistent": False,
             "runner": "Goose",
+            "needs_auth": not oauth_ready("chatgpt_codex"),
         },
         "openrouter": {
             "label": "OpenRouter / Goose",
@@ -187,10 +196,11 @@ def provider_capabilities() -> dict:
         },
         "gemini": {
             "label": "Gemini",
-            "available": goose and (goose_config / "gemini_oauth").exists(),
+            "available": goose and oauth_ready("gemini_oauth"),
             "default": False,
             "persistent": False,
             "runner": "Goose",
+            "needs_auth": not oauth_ready("gemini_oauth"),
         },
         "codex": {"label": "OpenAI Codex", "available": bool(command_path(CODEX_BIN)), "default": False, "persistent": True},
         "grok": {"label": "Grok", "available": bool(command_path(GROK_BIN)), "default": False, "persistent": True},
