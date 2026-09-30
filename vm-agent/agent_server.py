@@ -6,6 +6,7 @@ import shutil
 import socket
 import subprocess
 import time
+import urllib.request
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
@@ -22,6 +23,8 @@ GOOSE_BIN = os.environ.get("GOOSE_BIN", "/usr/local/bin/goose")
 CODEX_BIN = os.environ.get("CODEX_BIN", "/srv/codepilot-agent/bin/codex")
 GROK_BIN = os.environ.get("GROK_BIN", "/srv/codepilot-agent/bin/grok")
 CURSOR_BIN = os.environ.get("CURSOR_BIN", "/srv/codepilot-agent/.local/bin/cursor-agent")
+CHATGPT_DESKTOP_BRIDGE = Path(os.environ.get("CHATGPT_DESKTOP_BRIDGE", "/srv/codepilot-agent/chatgpt_desktop_bridge.py")).resolve()
+CHATGPT_DESKTOP_CDP_LIST = os.environ.get("CHATGPT_DESKTOP_CDP_LIST", "http://127.0.0.1:9223/json/list")
 TRAILBLAZE_BIN = os.environ.get("TRAILBLAZE_BIN", "trailblaze")
 TRAILBLAZE_PORT = int(os.environ.get("TRAILBLAZE_PORT", "52525"))
 WORKSPACE = Path(os.environ.get("CODEPILOT_WORKSPACE", "/srv/codepilot-workspace")).resolve()
@@ -52,7 +55,7 @@ PROVIDER_SESSION_STATE.parent.mkdir(parents=True, exist_ok=True)
 class TaskRequest(BaseModel):
     prompt: str = Field(min_length=1, max_length=8000)
     mode: Literal["read", "workspace"] = "read"
-    provider: Literal["chatgpt", "openrouter", "gemini", "codex", "grok", "cursor"] = "chatgpt"
+    provider: Literal["chatgpt_desktop", "chatgpt", "openrouter", "gemini", "codex", "grok", "cursor"] = "chatgpt"
     web: bool = False
     chat_id: Optional[str] = Field(default=None, max_length=128)
     context_prompt: Optional[str] = Field(default=None, max_length=16000)
@@ -94,7 +97,7 @@ def provider_session_key(req: TaskRequest) -> str:
 
 
 def get_provider_session(req: TaskRequest) -> Optional[str]:
-    if not req.chat_id or req.provider in {"chatgpt", "openrouter", "gemini"}:
+    if not req.chat_id or req.provider in {"chatgpt_desktop", "chatgpt", "openrouter", "gemini"}:
         return None
     chat = provider_sessions.get(req.chat_id)
     if not isinstance(chat, dict):
@@ -107,7 +110,7 @@ def get_provider_session(req: TaskRequest) -> Optional[str]:
 
 
 def set_provider_session(req: TaskRequest, session_id: str):
-    if not req.chat_id or req.provider in {"chatgpt", "openrouter", "gemini"} or not session_id:
+    if not req.chat_id or req.provider in {"chatgpt_desktop", "chatgpt", "openrouter", "gemini"} or not session_id:
         return
     chat = provider_sessions.setdefault(req.chat_id, {})
     chat[provider_session_key(req)] = {
@@ -210,14 +213,33 @@ def provider_capabilities() -> dict:
         except (OSError, subprocess.SubprocessError):
             return False
 
+    def chatgpt_desktop_ready() -> bool:
+        if not CHATGPT_DESKTOP_BRIDGE.is_file():
+            return False
+        try:
+            with urllib.request.urlopen(CHATGPT_DESKTOP_CDP_LIST, timeout=1.5) as response:
+                targets = json.loads(response.read().decode("utf-8"))
+            return any(
+                isinstance(target, dict)
+                and target.get("type") == "page"
+                and target.get("url") == "app://-/index.html"
+                and target.get("webSocketDebuggerUrl")
+                for target in targets
+            )
+        except Exception:
+            return False
+
+    desktop_ready = chatgpt_desktop_ready()
+
     return {
         "chatgpt_desktop": {
             "label": "ChatGPT Desktop · Chat",
-            "available": False,
+            "available": desktop_ready,
             "default": False,
-            "persistent": True,
+            "persistent": False,
             "runner": "ChatGPT Desktop",
-            "reason": "Normal ChatGPT Chat is separate from Goose/Codex and no supported VM chat bridge is connected.",
+            "chat_only": True,
+            "reason": None if desktop_ready else "Open or restart ChatGPT Desktop on the VM so the localhost bridge can attach.",
         },
         "chatgpt": {
             "label": "Goose · ChatGPT Codex",
@@ -317,6 +339,27 @@ Do not browse websites or make outbound web requests for this task. If current o
     return rules + "\n" + web_rules + "\nUSER TASK:\n" + (task_prompt if task_prompt is not None else req.prompt)
 
 
+def desktop_chat_prompt(req: TaskRequest, task_prompt: Optional[str] = None) -> str:
+    if req.mode != "read":
+        raise HTTPException(
+            status_code=400,
+            detail="ChatGPT Desktop · Chat is chat-only. Choose Read only mode or use an agent brain for VM file edits.",
+        )
+    if req.web:
+        web_rule = "Web access is enabled for this CodePilot request. You may use normal ChatGPT web capabilities if they are available and useful."
+    else:
+        web_rule = "Web access is disabled for this CodePilot request. Do not browse or use web search."
+
+    return f"""You are the normal ChatGPT Chat brain inside CodePilot.
+This Chat session has no direct VM shell or filesystem access.
+Do not claim that you inspected, executed, edited, or changed VM files, processes, services, repositories, or settings.
+Answer the user using the supplied conversation context. If the request asks for VM or file modifications, explain or propose the exact changes, but do not claim execution.
+{web_rule}
+
+CODEPILOT CONVERSATION / USER REQUEST:
+{task_prompt if task_prompt is not None else req.prompt}"""
+
+
 def goose_command(full_prompt: str, provider: str = "chatgpt"):
     provider_name = {
         "chatgpt": "chatgpt_codex",
@@ -346,6 +389,8 @@ def goose_command(full_prompt: str, provider: str = "chatgpt"):
 
 
 def provider_model_name(req: TaskRequest) -> str:
+    if req.provider == "chatgpt_desktop":
+        return "ChatGPT Desktop · Chat"
     if req.provider == "chatgpt":
         return "Goose · ChatGPT Codex"
     if req.provider == "openrouter":
@@ -362,7 +407,21 @@ def provider_model_name(req: TaskRequest) -> str:
 
 
 def provider_command(req: TaskRequest, full_prompt: str, session_id: Optional[str] = None):
-    if req.provider == "codex":
+    if req.provider == "chatgpt_desktop":
+        if req.mode != "read":
+            raise HTTPException(
+                status_code=400,
+                detail="ChatGPT Desktop · Chat is chat-only. Choose Read only mode or use an agent brain for VM file edits.",
+            )
+        if not CHATGPT_DESKTOP_BRIDGE.is_file():
+            raise HTTPException(status_code=503, detail="ChatGPT Desktop bridge is not installed for the VM Agent")
+        command = [
+            "/usr/bin/python3",
+            str(CHATGPT_DESKTOP_BRIDGE),
+            "--timeout",
+            str(max(30, min(TASK_TIMEOUT - 10, 240))),
+        ]
+    elif req.provider == "codex":
         if session_id:
             command = [
                 CODEX_BIN, "exec", "resume", "--skip-git-repo-check", "--json",
@@ -563,13 +622,17 @@ async def execute(req: TaskRequest, wait_for_slot: bool = False, mission_id: Opt
     async with task_lock:
         task_id = mission_id or uuid.uuid4().hex[:12]
         native_session_id = get_provider_session(req)
-        if req.provider in {"chatgpt", "openrouter", "gemini"}:
+        if req.provider in {"chatgpt_desktop", "chatgpt", "openrouter", "gemini"}:
             provider_prompt = req.context_prompt or req.prompt
         elif native_session_id:
             provider_prompt = req.prompt
         else:
             provider_prompt = req.context_prompt or req.prompt
-        full_prompt = policy_prompt(req, provider_prompt)
+        full_prompt = (
+            desktop_chat_prompt(req, provider_prompt)
+            if req.provider == "chatgpt_desktop"
+            else policy_prompt(req, provider_prompt)
+        )
         model_name = provider_model_name(req)
         command = provider_command(req, full_prompt, native_session_id)
         proc = None
@@ -593,6 +656,7 @@ async def execute(req: TaskRequest, wait_for_slot: bool = False, mission_id: Opt
             proc = await asyncio.create_subprocess_exec(
                 *command,
                 cwd=str(WORKSPACE),
+                stdin=asyncio.subprocess.PIPE if req.provider == "chatgpt_desktop" else None,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
                 env=os.environ.copy(),
@@ -600,7 +664,11 @@ async def execute(req: TaskRequest, wait_for_slot: bool = False, mission_id: Opt
             active_task_process = proc
             if mission_id:
                 active_processes[mission_id] = proc
-            stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=TASK_TIMEOUT)
+            stdin_payload = full_prompt.encode("utf-8") if req.provider == "chatgpt_desktop" else None
+            stdout, stderr = await asyncio.wait_for(
+                proc.communicate(input=stdin_payload),
+                timeout=TASK_TIMEOUT,
+            )
         except asyncio.TimeoutError:
             if proc:
                 try:
@@ -645,7 +713,8 @@ async def execute(req: TaskRequest, wait_for_slot: bool = False, mission_id: Opt
             raise HTTPException(status_code=409, detail="Queued command cancelled")
 
         if proc is None or proc.returncode != 0:
-            detail = stderr.decode("utf-8", "replace")[-1800:] if proc else "Goose failed to start"
+            fallback_error = provider_model_name(req) + " failed to start"
+            detail = stderr.decode("utf-8", "replace")[-1800:] if proc else fallback_error
             last_run = {
                 "id": task_id,
                 "kind": "queued_command" if mission_id else "chat",
@@ -656,12 +725,33 @@ async def execute(req: TaskRequest, wait_for_slot: bool = False, mission_id: Opt
                 "started_at": started_at,
                 "completed_at": now_iso(),
                 "duration_seconds": round(time.monotonic() - started_monotonic, 2),
-                "error": detail or "Goose failed",
+                "error": detail or fallback_error,
             }
-            raise HTTPException(status_code=502, detail=detail or "Goose failed")
+            raise HTTPException(status_code=502, detail=detail or fallback_error)
 
         try:
-            if req.provider in {"chatgpt", "openrouter", "gemini"}:
+            if req.provider == "chatgpt_desktop":
+                try:
+                    payload = json.loads(stdout.decode("utf-8"))
+                except Exception:
+                    preview = stdout.decode("utf-8", "replace")[-800:]
+                    detail = "ChatGPT Desktop bridge returned invalid JSON" + (": " + preview if preview else "")
+                    raise HTTPException(status_code=502, detail=detail)
+                result_text = str(payload.get("result") or "").strip()
+                if not payload.get("ok") or not result_text:
+                    raise HTTPException(
+                        status_code=502,
+                        detail=str(payload.get("error") or "ChatGPT Desktop completed without a text response"),
+                    )
+                result = {
+                    "ok": True,
+                    "result": result_text,
+                    "tokens": payload.get("tokens") if isinstance(payload.get("tokens"), dict) else {"total": None, "input": None, "output": None},
+                    "cost_usd": payload.get("cost_usd"),
+                    "inference": payload.get("inference") if isinstance(payload.get("inference"), dict) else {"provider": "chatgpt_desktop", "requestedModel": model_name},
+                    "status": str(payload.get("status") or "completed"),
+                }
+            elif req.provider in {"chatgpt", "openrouter", "gemini"}:
                 try:
                     payload = json.loads(stdout.decode("utf-8"))
                 except Exception:
@@ -693,7 +783,7 @@ async def execute(req: TaskRequest, wait_for_slot: bool = False, mission_id: Opt
             raise
 
         session_id = result.pop("_session_id", None)
-        if session_id and req.chat_id and req.provider not in {"chatgpt", "openrouter", "gemini"}:
+        if session_id and req.chat_id and req.provider not in {"chatgpt_desktop", "chatgpt", "openrouter", "gemini"}:
             set_provider_session(req, str(session_id))
             result["native_session"] = {
                 "id": str(session_id),
