@@ -3,6 +3,7 @@ import json
 import os
 import secrets
 import shutil
+import signal
 import socket
 import subprocess
 import tempfile
@@ -137,6 +138,24 @@ def command_path(command: str) -> Optional[str]:
     if "/" in command:
         return command if Path(command).exists() else None
     return shutil.which(command)
+
+
+async def cleanup_cursor_process_group(proc: Optional[asyncio.subprocess.Process]):
+    if not proc:
+        return
+    try:
+        os.killpg(proc.pid, signal.SIGTERM)
+    except (ProcessLookupError, PermissionError, OSError):
+        return
+    await asyncio.sleep(0.2)
+    try:
+        os.killpg(proc.pid, 0)
+    except (ProcessLookupError, PermissionError, OSError):
+        return
+    try:
+        os.killpg(proc.pid, signal.SIGKILL)
+    except (ProcessLookupError, PermissionError, OSError):
+        pass
 
 
 def tcp_ready(host: str, port: int, timeout: float = 0.15) -> bool:
@@ -666,6 +685,7 @@ async def execute(req: TaskRequest, wait_for_slot: bool = False, mission_id: Opt
                 stdout=cursor_stdout_file if req.provider == "cursor" else asyncio.subprocess.PIPE,
                 stderr=cursor_stderr_file if req.provider == "cursor" else asyncio.subprocess.PIPE,
                 env=os.environ.copy(),
+                start_new_session=req.provider == "cursor",
             )
             active_task_process = proc
             if mission_id:
@@ -704,6 +724,8 @@ async def execute(req: TaskRequest, wait_for_slot: bool = False, mission_id: Opt
             if mission_id:
                 active_processes.pop(mission_id, None)
             active_task_process = None
+            if req.provider == "cursor":
+                await cleanup_cursor_process_group(proc)
             for handle in (cursor_stdout_file, cursor_stderr_file):
                 if handle is not None:
                     try:
