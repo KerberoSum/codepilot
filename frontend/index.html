@@ -1531,10 +1531,11 @@ async function loadVmCapabilities(){
           gemini:"Gemini"
         };
         option.disabled=!ready;
-        option.textContent=(info?.label||labels[option.value]||option.value)+(ready?"":" · unavailable");
+        const suffix=ready?"":(info?.needs_auth?" · sign in needed":" · unavailable");
+        option.textContent=(info?.label||labels[option.value]||option.value)+suffix;
         option.title=option.value==="codex"
           ?"Codex uses your ChatGPT Work/Codex credit allowance. Token usage is shown after each run."
-          :(ready?"Ready on the VM.":"This brain is listed but the installed VM Agent has not enabled it yet.");
+          :(ready?"Ready on the VM.":(info?.needs_auth?"One-time OAuth sign-in is required on the VM.":"This brain is listed but the installed VM Agent has not enabled it yet."));
       });
       if(providerSelect.selectedOptions[0]?.disabled){
         const firstReady=[...providerSelect.options].find(option=>!option.disabled);
