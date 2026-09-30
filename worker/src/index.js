@@ -227,7 +227,7 @@ export default {
         ).bind(chatId).first();
         if (!chat) return { chatId, changed: false };
 
-        const provider = ["openrouter","codex","grok","cursor"].includes(String(mission?.provider || ""))
+        const provider = ["chatgpt","openrouter","gemini","codex","grok","cursor"].includes(String(mission?.provider || ""))
           ? String(mission.provider) : "openrouter";
         const mode = mission?.mode === "workspace" ? "workspace" : "read";
         const web = mission?.web === true || Number(mission?.web || 0) === 1 ? 1 : 0;
@@ -570,7 +570,7 @@ export default {
         const prompt = String(body?.prompt || "").trim();
         const contextPrompt = String(body?.contextPrompt || "").trim().slice(0, 16000);
         const mode = String(body?.mode || "read");
-        const provider = ["openrouter","codex","grok","cursor"].includes(String(body?.provider || "")) ? String(body.provider) : "openrouter";
+        const provider = ["chatgpt","openrouter","gemini","codex","grok","cursor"].includes(String(body?.provider || "")) ? String(body.provider) : "openrouter";
         const web = body?.web === true;
         const chatId = String(body?.chatId || "").trim().slice(0, 128);
         if (!prompt) return json({ success: false, error: "Task prompt is required." }, 400);
@@ -671,7 +671,7 @@ export default {
           String(body?.mode || "read");
 
         const provider =
-          ["openrouter","codex","grok","cursor"].includes(String(body?.provider || "")) ? String(body.provider) : "openrouter";
+          ["chatgpt","openrouter","gemini","codex","grok","cursor"].includes(String(body?.provider || "")) ? String(body.provider) : "openrouter";
 
         const web =
           body?.web === true;
@@ -809,7 +809,7 @@ export default {
         const title = (rawTitle || "New VM Chat").slice(0, 120);
         const mode = body?.mode === "workspace" ? "workspace" : "read";
         const web = body?.web === true ? 1 : 0;
-        const provider = ["openrouter","codex","grok","cursor"].includes(String(body?.provider || "")) ? String(body.provider) : "openrouter";
+        const provider = ["chatgpt","openrouter","gemini","codex","grok","cursor"].includes(String(body?.provider || "")) ? String(body.provider) : "openrouter";
         const projectId = String(body?.projectId || "").trim().slice(0, 128) || null;
         try {
           await ensureVmChatTables();
@@ -852,7 +852,7 @@ export default {
           const title = String(body?.title ?? current.title).trim().slice(0, 120) || "VM Chat";
           const mode = body?.mode === "workspace" ? "workspace" : body?.mode === "read" ? "read" : current.mode;
           const web = typeof body?.web === "boolean" ? (body.web ? 1 : 0) : Number(current.web || 0);
-          const provider = ["openrouter","codex","grok","cursor"].includes(String(body?.provider || "")) ? String(body.provider) : (current.provider || "openrouter");
+          const provider = ["chatgpt","openrouter","gemini","codex","grok","cursor"].includes(String(body?.provider || "")) ? String(body.provider) : (current.provider || "openrouter");
           const projectId = Object.prototype.hasOwnProperty.call(body || {}, "projectId")
             ? (String(body?.projectId || "").trim().slice(0, 128) || null)
             : (current.project_id || null);
@@ -880,7 +880,7 @@ export default {
         const content = String(body?.content || "");
         const mode = body?.mode === "workspace" ? "workspace" : "read";
         const web = body?.web === true ? 1 : 0;
-        const provider = ["openrouter","codex","grok","cursor"].includes(String(body?.provider || "")) ? String(body.provider) : "openrouter";
+        const provider = ["chatgpt","openrouter","gemini","codex","grok","cursor"].includes(String(body?.provider || "")) ? String(body.provider) : "openrouter";
         const error = body?.error === true ? 1 : 0;
         if (!content.trim()) return json({ success: false, error: "Message content is required." }, 400);
         await ensureVmChatTables();
@@ -977,7 +977,7 @@ export default {
         const contextPrompt = String(body?.contextPrompt || "").trim().slice(0, 16000);
         const chatId = String(body?.chatId || "").trim().slice(0, 128);
         const mode = String(body?.mode || "workspace");
-        const provider = ["openrouter","codex","grok","cursor"].includes(String(body?.provider || "")) ? String(body.provider) : "openrouter";
+        const provider = ["chatgpt","openrouter","gemini","codex","grok","cursor"].includes(String(body?.provider || "")) ? String(body.provider) : "openrouter";
         const web = body?.web === true;
         const title = String(body?.title || "").trim().slice(0, 120);
         if (!prompt) return json({ success: false, error: "Queued command is required." }, 400);
