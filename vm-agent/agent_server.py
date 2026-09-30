@@ -178,6 +178,38 @@ def provider_capabilities() -> dict:
         except OSError:
             return False
 
+    def goose_secret_ready(name: str) -> bool:
+        if os.environ.get(name):
+            return True
+        secret_file = goose_config / "secrets.yaml"
+        try:
+            for line in secret_file.read_text(encoding="utf-8").splitlines():
+                if not line.startswith(name + ":"):
+                    continue
+                value = line.split(":", 1)[1].strip().strip("'\"")
+                return bool(value)
+        except OSError:
+            pass
+        return False
+
+    def cursor_auth_ready() -> bool:
+        cursor = command_path(CURSOR_BIN)
+        if not cursor:
+            return False
+        try:
+            result = subprocess.run(
+                [cursor, "status"],
+                capture_output=True,
+                text=True,
+                timeout=3,
+                check=False,
+                env={**os.environ, "HOME": str(Path.home())},
+            )
+            output = (result.stdout + "\n" + result.stderr).lower()
+            return "not logged in" not in output and "authentication required" not in output
+        except (OSError, subprocess.SubprocessError):
+            return False
+
     return {
         "chatgpt_desktop": {
             "label": "ChatGPT Desktop · Chat",
@@ -198,11 +230,12 @@ def provider_capabilities() -> dict:
         },
         "openrouter": {
             "label": "Goose · OpenRouter",
-            "available": goose,
+            "available": goose and goose_secret_ready("OPENROUTER_API_KEY"),
             "default": False,
             "persistent": False,
             "runner": "Goose",
             "usage_pool": "OpenRouter",
+            "needs_auth": not goose_secret_ready("OPENROUTER_API_KEY"),
         },
         "gemini": {
             "label": "Gemini",
@@ -214,7 +247,7 @@ def provider_capabilities() -> dict:
         },
         "codex": {"label": "Codex CLI · credits", "available": bool(command_path(CODEX_BIN)), "default": False, "persistent": True, "usage_pool": "Codex"},
         "grok": {"label": "Grok", "available": bool(command_path(GROK_BIN)), "default": False, "persistent": True},
-        "cursor": {"label": "Cursor Agent", "available": bool(command_path(CURSOR_BIN)), "default": False, "persistent": True},
+        "cursor": {"label": "Cursor Agent", "available": cursor_auth_ready(), "default": False, "persistent": True, "needs_auth": not cursor_auth_ready()},
     }
 
 
