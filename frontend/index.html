@@ -872,15 +872,23 @@ function setVmAgentPreset(prompt,mode="read",web=false){
 function vmAgentWebEnabled(){return document.getElementById("vmAgentWeb")?.checked===true;}
 function vmAgentProvider(){return document.getElementById("vmAgentProvider")?.value||"chatgpt";}
 function vmAgentProviderChanged(){
+  const provider=vmAgentProvider();
+  const desktop=provider==="chatgpt_desktop";
+  const mode=document.getElementById("vmAgentMode");
+  if(mode){
+    if(desktop)mode.value="read";
+    mode.disabled=desktop;
+    mode.title=desktop?"Normal ChatGPT Chat is chat-only; choose another brain for VM file edits.":"";
+  }
   const meta=document.getElementById("vmAgentMeta");
   if(!meta)return;
-  if(vmAgentProvider()==="chatgpt_desktop"){
-    meta.textContent="Normal ChatGPT Chat is a separate desktop/web experience. No supported VM bridge is connected yet.";
-  }else if(vmAgentProvider()==="chatgpt"){
+  if(desktop){
+    meta.textContent="Normal ChatGPT Desktop Chat · temporary session · chat-only (no direct VM file tools).";
+  }else if(provider==="chatgpt"){
     meta.textContent="Goose is the agent. Its model provider is ChatGPT Codex via your ChatGPT-plan OAuth; this is not normal ChatGPT Chat.";
-  }else if(vmAgentProvider()==="codex"){
+  }else if(provider==="codex"){
     meta.textContent="Codex CLI uses the Codex usage/credit pool · token usage will be shown after each run.";
-  }else if(vmAgentProvider()==="openrouter"){
+  }else if(provider==="openrouter"){
     meta.textContent="Goose is the agent and OpenRouter supplies the model.";
   }else if(!currentVmChat){
     meta.textContent="";
@@ -1239,11 +1247,13 @@ async function runVmAgentTask(){
   input.value="";
   meta.textContent=provider==="codex"
     ?"Codex CLI · credits · running now · token usage will be shown when complete…"
-    :provider==="chatgpt"
-      ?"Goose · ChatGPT Codex · running now…"
-      :provider==="openrouter"
-        ?"Goose · OpenRouter · running now…"
-        :"Queueing with Remote Worker…";
+    :provider==="chatgpt_desktop"
+      ?"ChatGPT Desktop · Chat · running in a temporary Chat…"
+      :provider==="chatgpt"
+        ?"Goose · ChatGPT Codex · running now…"
+        :provider==="openrouter"
+          ?"Goose · OpenRouter · running now…"
+          :"Queueing with Remote Worker…";
   const started=performance.now();
   let finalData=null,streamFailure=null,pending=null;
 
@@ -1545,7 +1555,7 @@ async function loadVmCapabilities(){
         const suffix=ready?"":(info?.needs_auth?" · sign in needed":" · unavailable");
         option.textContent=(labels[option.value]||info?.label||option.value)+suffix;
         option.title=option.value==="chatgpt_desktop"
-          ?"Normal ChatGPT Chat is separate from Goose and Codex. This VM does not currently expose a supported Chat bridge."
+          ?"Uses the normal Chat experience in the VM's ChatGPT desktop app through a localhost-only accessibility bridge. Runs as a temporary Chat and has no direct VM file tools."
           :option.value==="chatgpt"
             ?"Goose agent using the ChatGPT Codex provider through your ChatGPT-plan OAuth. This is not normal ChatGPT Chat."
             :option.value==="codex"
@@ -1558,6 +1568,7 @@ async function loadVmCapabilities(){
         const firstReady=[...providerSelect.options].find(option=>!option.disabled);
         if(firstReady)providerSelect.value=firstReady.value;
       }
+      vmAgentProviderChanged();
     }
     const b=d.browser||{},s=d.system||{},q=d.queue||{};
     if(browser){
