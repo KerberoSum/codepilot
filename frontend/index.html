@@ -14,6 +14,8 @@
 }
 body{font-family:Inter,-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial,sans-serif;background:var(--bg);color:var(--text)}
 button,input,textarea,select{font:inherit}button{cursor:pointer}.hidden{display:none!important}
+body.auth-locked > :not(#authModal):not(script){display:none!important}
+body.auth-locked #authModal{display:grid!important;background:var(--bg)}
 .app{height:100vh;display:grid;grid-template-columns:var(--left-size,245px) 6px minmax(300px,1fr) 6px var(--workbench-size,46vw);grid-template-rows:minmax(0,1fr);grid-template-areas:"left split-left chat split-right workbench";overflow:hidden}
 
 /* LEFT */
@@ -205,7 +207,7 @@ button,input,textarea,select{font:inherit}button{cursor:pointer}.hidden{display:
 }
 </style>
 </head>
-<body>
+<body class="auth-locked">
 <div class="app">
 
 <aside id="leftPanel" class="left">
@@ -497,9 +499,9 @@ button,input,textarea,select{font:inherit}button{cursor:pointer}.hidden{display:
           <label for="vmAgentProvider" style="font-size:9px;color:var(--muted)">Brain</label>
           <select id="vmAgentProvider" title="Choose which AI handles this VM Agent request" onchange="vmAgentProviderChanged()">
             <option value="openrouter">OpenRouter / Goose</option>
-            <option value="codex" disabled>OpenAI Codex · Work credits</option>
-            <option value="grok" disabled>Grok Build · setup needed</option>
-            <option value="cursor" disabled>Cursor Agent · setup needed</option>
+            <option value="codex">OpenAI Codex · Work credits</option>
+            <option value="grok">Grok Build</option>
+            <option value="cursor">Cursor Agent</option>
           </select>
           <label class="agent-toggle" title="Allow this chat and its queued commands to browse public websites">
             <input id="vmAgentWeb" type="checkbox" checked>
@@ -708,11 +710,12 @@ async function api(path,options={}){
 }
 
 function showLogin(){
+  document.body.classList.add("auth-locked");
   document.getElementById("authModal").classList.remove("hidden");
   document.getElementById("logoutButton")?.classList.add("hidden");
   setTimeout(()=>document.getElementById("authPassword")?.focus(),30);
 }
-function showAuthenticatedUI(){document.getElementById("authModal").classList.add("hidden");document.getElementById("logoutButton")?.classList.remove("hidden");}
+function showAuthenticatedUI(){document.body.classList.remove("auth-locked");document.getElementById("authModal").classList.add("hidden");document.getElementById("logoutButton")?.classList.remove("hidden");}
 function clearAuthToken(){authToken="";try{sessionStorage.removeItem("codepilot-auth-token")}catch{}}
 async function login(){
   const input=document.getElementById("authPassword"),button=document.getElementById("authButton"),error=document.getElementById("authError");
@@ -1410,18 +1413,14 @@ async function loadVmCapabilities(){
     if(providerSelect){
       [...providerSelect.options].forEach(option=>{
         const info=providers[option.value];
-        if(option.value==="openrouter"){option.disabled=false;option.textContent="OpenRouter / Goose";return;}
-        if(option.value==="codex"){
-          option.disabled=!(d.providerRouting===true&&info&&info.available);
-          option.textContent="OpenAI Codex · Work credits"+(option.disabled?" · setup needed":"");
-          option.title="Codex uses your ChatGPT Work/Codex credit allowance. Token usage is shown after each run.";
-          return;
-        }
-        option.disabled=!(d.providerRouting===true&&info&&info.available);
-        const labels={grok:"Grok Build",cursor:"Cursor Agent"};
-        option.textContent=(labels[option.value]||option.value)+(option.disabled?" · setup needed":"");
+        const ready=d.providerRouting===true&&info&&info.available;
+        const labels={openrouter:"OpenRouter / Goose",codex:"OpenAI Codex · Work credits",grok:"Grok Build",cursor:"Cursor Agent"};
+        option.disabled=false;
+        option.textContent=(labels[option.value]||option.value)+(ready?"":" · unavailable");
+        option.title=option.value==="codex"
+          ?"Codex uses your ChatGPT Work/Codex credit allowance. Token usage is shown after each run."
+          :(ready?"Ready on the VM.":"This brain is listed but is not currently ready on the VM.");
       });
-      if(providerSelect.selectedOptions[0]?.disabled)providerSelect.value="openrouter";
     }
     const b=d.browser||{},s=d.system||{},q=d.queue||{};
     if(browser){
