@@ -178,7 +178,8 @@ export default {
             mode TEXT NOT NULL DEFAULT 'read',
             web INTEGER NOT NULL DEFAULT 0,
             provider TEXT NOT NULL DEFAULT 'openrouter',
-            last_read_at INTEGER
+            last_read_at INTEGER,
+            project_id TEXT
           )
         `).run();
         try {
@@ -187,6 +188,9 @@ export default {
         try {
           await env.DB.prepare("ALTER TABLE vm_agent_chats ADD COLUMN last_read_at INTEGER").run();
           await env.DB.prepare("UPDATE vm_agent_chats SET last_read_at = updated_at WHERE last_read_at IS NULL").run();
+        } catch {}
+        try {
+          await env.DB.prepare("ALTER TABLE vm_agent_chats ADD COLUMN project_id TEXT").run();
         } catch {}
         await env.DB.prepare(`
           CREATE TABLE IF NOT EXISTS vm_agent_messages (
@@ -786,7 +790,7 @@ export default {
         try {
           await ensureVmChatTables();
           const result = await env.DB.prepare(`
-            SELECT id, title, created_at, updated_at, mode, web, provider, COALESCE(last_read_at, updated_at) AS last_read_at
+            SELECT id, title, created_at, updated_at, mode, web, provider, project_id, COALESCE(last_read_at, updated_at) AS last_read_at
             FROM vm_agent_chats
             ORDER BY updated_at DESC
             LIMIT 100
@@ -806,13 +810,14 @@ export default {
         const mode = body?.mode === "workspace" ? "workspace" : "read";
         const web = body?.web === true ? 1 : 0;
         const provider = ["openrouter","codex","grok","cursor"].includes(String(body?.provider || "")) ? String(body.provider) : "openrouter";
+        const projectId = String(body?.projectId || "").trim().slice(0, 128) || null;
         try {
           await ensureVmChatTables();
           await env.DB.prepare(`
-            INSERT INTO vm_agent_chats (id, title, created_at, updated_at, mode, web, provider, last_read_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-          `).bind(id, title, now, now, mode, web, provider, now).run();
-          return json({ success: true, chat: { id, title, created_at: now, updated_at: now, mode, web, provider, last_read_at: now } });
+            INSERT INTO vm_agent_chats (id, title, created_at, updated_at, mode, web, provider, last_read_at, project_id)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+          `).bind(id, title, now, now, mode, web, provider, now, projectId).run();
+          return json({ success: true, chat: { id, title, created_at: now, updated_at: now, mode, web, provider, last_read_at: now, project_id: projectId } });
         } catch (error) {
           return json({ success: false, error: "Could not create VM Agent chat: " + (error?.message || String(error)) }, 500);
         }
@@ -827,7 +832,7 @@ export default {
           const readAt = Date.now();
           await env.DB.prepare("UPDATE vm_agent_chats SET last_read_at = ? WHERE id = ?").bind(readAt, chatId).run();
           const chat = await env.DB.prepare(`
-            SELECT id, title, created_at, updated_at, mode, web, provider, COALESCE(last_read_at, updated_at) AS last_read_at
+            SELECT id, title, created_at, updated_at, mode, web, provider, project_id, COALESCE(last_read_at, updated_at) AS last_read_at
             FROM vm_agent_chats WHERE id = ? LIMIT 1
           `).bind(chatId).first();
           if (!chat) return json({ success: false, error: "VM Agent chat not found." }, 404);
@@ -848,11 +853,14 @@ export default {
           const mode = body?.mode === "workspace" ? "workspace" : body?.mode === "read" ? "read" : current.mode;
           const web = typeof body?.web === "boolean" ? (body.web ? 1 : 0) : Number(current.web || 0);
           const provider = ["openrouter","codex","grok","cursor"].includes(String(body?.provider || "")) ? String(body.provider) : (current.provider || "openrouter");
+          const projectId = Object.prototype.hasOwnProperty.call(body || {}, "projectId")
+            ? (String(body?.projectId || "").trim().slice(0, 128) || null)
+            : (current.project_id || null);
           const updatedAt = Date.now();
           await env.DB.prepare(`
-            UPDATE vm_agent_chats SET title = ?, mode = ?, web = ?, provider = ?, updated_at = ? WHERE id = ?
-          `).bind(title, mode, web, provider, updatedAt, chatId).run();
-          return json({ success: true, chat: { ...current, title, mode, web, provider, updated_at: updatedAt } });
+            UPDATE vm_agent_chats SET title = ?, mode = ?, web = ?, provider = ?, project_id = ?, updated_at = ? WHERE id = ?
+          `).bind(title, mode, web, provider, projectId, updatedAt, chatId).run();
+          return json({ success: true, chat: { ...current, title, mode, web, provider, project_id: projectId, updated_at: updatedAt } });
         }
 
         if (request.method === "DELETE") {
