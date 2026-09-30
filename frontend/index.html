@@ -497,10 +497,12 @@ body.auth-locked #authModal{display:grid!important;background:var(--bg)}
           </select>
           <label for="vmAgentProvider" style="font-size:9px;color:var(--muted)">Brain</label>
           <select id="vmAgentProvider" title="Choose which AI handles this VM Agent request" onchange="vmAgentProviderChanged()">
-            <option value="openrouter">OpenRouter / Goose</option>
+            <option value="chatgpt">ChatGPT / OpenAI</option>
             <option value="codex">OpenAI Codex · Work credits</option>
-            <option value="grok">Grok Build</option>
             <option value="cursor">Cursor Agent</option>
+            <option value="openrouter">OpenRouter / Goose</option>
+            <option value="grok">Grok</option>
+            <option value="gemini">Gemini</option>
           </select>
           <label class="agent-toggle" title="Allow this chat and its queued commands to browse public websites">
             <input id="vmAgentWeb" type="checkbox" checked>
@@ -867,11 +869,13 @@ function setVmAgentPreset(prompt,mode="read",web=false){
 }
 
 function vmAgentWebEnabled(){return document.getElementById("vmAgentWeb")?.checked===true;}
-function vmAgentProvider(){return document.getElementById("vmAgentProvider")?.value||"openrouter";}
+function vmAgentProvider(){return document.getElementById("vmAgentProvider")?.value||"chatgpt";}
 function vmAgentProviderChanged(){
   const meta=document.getElementById("vmAgentMeta");
   if(!meta)return;
-  if(vmAgentProvider()==="codex"){
+  if(vmAgentProvider()==="chatgpt"){
+    meta.textContent="ChatGPT / OpenAI runs through Goose using the VM's ChatGPT/OpenAI authentication.";
+  }else if(vmAgentProvider()==="codex"){
     meta.textContent="Codex uses ChatGPT Work/Codex credits · token usage will be shown after each run.";
   }else if(!currentVmChat){
     meta.textContent="";
@@ -946,7 +950,7 @@ async function loadVmChats(openRecent=false){
 }
 
 function vmBrainLabel(provider){
-  return ({openrouter:"Goose",codex:"Codex",grok:"Grok",cursor:"Cursor"})[provider]||"Goose";
+  return ({chatgpt:"ChatGPT",openrouter:"OpenRouter",gemini:"Gemini",codex:"Codex",grok:"Grok",cursor:"Cursor"})[provider]||provider||"AI";
 }
 
 function vmChatRelativeTime(value){
@@ -1514,16 +1518,28 @@ async function loadVmCapabilities(){
     if(worker){worker.textContent=d.remote_worker?"Ready":"Unavailable";worker.className=d.remote_worker?"ready":"offline";}
     const providerSelect=document.getElementById("vmAgentProvider"),providers=d.providers||{};
     if(providerSelect){
+      const legacyGoose=!providers.chatgpt&&!!providers.openrouter;
       [...providerSelect.options].forEach(option=>{
         const info=providers[option.value];
         const ready=d.providerRouting===true&&info&&info.available;
-        const labels={openrouter:"OpenRouter / Goose",codex:"OpenAI Codex · Work credits",grok:"Grok Build",cursor:"Cursor Agent"};
-        option.disabled=false;
-        option.textContent=(labels[option.value]||option.value)+(ready?"":" · unavailable");
+        const labels={
+          chatgpt:"ChatGPT / OpenAI",
+          codex:"OpenAI Codex · Work credits",
+          cursor:"Cursor Agent",
+          openrouter:legacyGoose?"Goose / OpenAI · legacy":"OpenRouter / Goose",
+          grok:"Grok",
+          gemini:"Gemini"
+        };
+        option.disabled=!ready;
+        option.textContent=(info?.label||labels[option.value]||option.value)+(ready?"":" · unavailable");
         option.title=option.value==="codex"
           ?"Codex uses your ChatGPT Work/Codex credit allowance. Token usage is shown after each run."
-          :(ready?"Ready on the VM.":"This brain is listed but is not currently ready on the VM.");
+          :(ready?"Ready on the VM.":"This brain is listed but the installed VM Agent has not enabled it yet.");
       });
+      if(providerSelect.selectedOptions[0]?.disabled){
+        const firstReady=[...providerSelect.options].find(option=>!option.disabled);
+        if(firstReady)providerSelect.value=firstReady.value;
+      }
     }
     const b=d.browser||{},s=d.system||{},q=d.queue||{};
     if(browser){
