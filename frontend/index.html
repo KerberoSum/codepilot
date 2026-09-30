@@ -165,6 +165,7 @@ body.auth-locked #authModal{display:grid!important;background:var(--bg)}
 .agent-secondary{border:1px solid var(--border);background:var(--panel3);color:var(--muted);border-radius:7px;padding:7px 9px;font-size:9px}.agent-secondary:hover{color:#fff;background:var(--border)}
 .agent-session-controls{display:flex;align-items:center;gap:5px;min-width:0}.agent-session-controls .chat-select{max-width:190px}
 .agent-chat-session-head{display:flex;align-items:center;justify-content:space-between;gap:6px;margin-bottom:5px}.agent-chat-session-head .agent-side-title{margin:0}.agent-chat-new{padding:4px 7px;font-size:8px}
+.agent-project-row{display:flex;gap:4px;align-items:center;margin-bottom:8px}.agent-project-select{min-width:0;flex:1;border:1px solid var(--border);background:var(--panel2);color:#fff;border-radius:7px;padding:7px 8px;font-size:9px}.agent-project-actions{display:flex;gap:2px}.agent-project-actions .icon-btn{border:1px solid var(--border);background:var(--panel2);padding:5px 6px;font-size:9px}
 .agent-chat-list{display:flex;flex-direction:column;gap:4px;max-height:250px;overflow:auto;margin-bottom:6px}
 .agent-chat-row{width:100%;border:1px solid var(--border);background:var(--panel2);border-radius:8px;padding:7px 8px;text-align:left;color:var(--text)}.agent-chat-row:hover{background:var(--panel3)}.agent-chat-row.active{border-color:rgba(116,87,255,.72);background:rgba(116,87,255,.12)}
 .agent-chat-row-title{font-size:9px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-bottom:4px}
@@ -317,12 +318,10 @@ body.auth-locked #authModal{display:grid!important;background:var(--bg)}
     <div class="ai-title">
       <button class="icon-btn mobile-nav" onclick="toggleLeft()" title="Workspace">☰</button>
       <strong>AI Assistant</strong>
-      <div class="ai-meta"><span id="aiProjectLabel">No project attached</span><button id="workerStatus" class="worker-status checking" onclick="checkWorkerHealth(true)" title="Run Worker diagnostics">Checking</button><button id="vmAgentButton" class="worker-status checking" onclick="openVmAgent()" title="Switch to the VM Agent workspace">VM Agent →</button></div>
+      <div class="ai-meta"><span id="aiProjectLabel">No project attached</span><button id="workerStatus" class="worker-status checking" onclick="checkWorkerHealth(true)" title="Run Worker diagnostics">Checking</button></div>
     </div>
     <div class="chat-controls">
       <div class="agent-page-actions" aria-label="CodePilot page switch">
-        <button class="agent-page-tab active" onclick="switchAppPage('workspace')">Workspace</button>
-        <button class="agent-page-tab" onclick="switchAppPage('agent')">VM Agent</button>
         <button class="agent-page-tab" onclick="switchAppPage('terminal')">Terminal</button>
       </div>
       <select id="chatSelect" class="chat-select" onchange="chatSelectChanged()"><option value="">New Chat</option></select>
@@ -407,15 +406,13 @@ body.auth-locked #authModal{display:grid!important;background:var(--bg)}
 
 
 <!-- VM Agent inner page -->
-<section id="agentPage" class="agent-page hidden" aria-label="VM Agent workspace">
+<section id="agentPage" class="agent-page" aria-label="VM Agent workspace">
   <header class="agent-page-top">
     <div class="agent-page-brand">
       <div class="logo">&lt;/&gt;</div>
-      <div><strong>CodePilot Remote Worker</strong><br><span>Chat, research the web, and queue follow-up commands on your Oracle VM</span></div>
+      <div><strong>CodePilot</strong><br><span>Projects, random chats, AI brains, and your Oracle VM in one place</span></div>
     </div>
     <div class="agent-page-actions">
-      <button class="agent-page-tab" onclick="switchAppPage('workspace')">Workspace</button>
-      <button class="agent-page-tab active">VM Agent</button>
       <button class="agent-page-tab" onclick="switchAppPage('terminal')">Terminal</button>
       <button class="worker-status checking" onclick="checkVmAgent(true)" title="Check VM connection"><span id="agentHeaderStatus">Checking</span></button>
     </div>
@@ -423,23 +420,23 @@ body.auth-locked #authModal{display:grid!important;background:var(--bg)}
 
   <div class="agent-page-body">
     <aside class="agent-side">
+      <div class="agent-side-title">CHAT GROUP</div>
+      <div class="agent-project-row">
+        <select id="vmProjectSelect" class="agent-project-select" onchange="vmProjectChanged()">
+          <option value="">Random Chats</option>
+        </select>
+        <div class="agent-project-actions">
+          <button class="icon-btn" onclick="createVmProject()" title="New project">＋</button>
+          <button class="icon-btn" onclick="renameVmProject()" title="Rename project">✎</button>
+          <button class="icon-btn" onclick="deleteVmProject()" title="Delete project">⌫</button>
+        </div>
+      </div>
+
       <div class="agent-chat-session-head">
         <div class="agent-side-title">CHAT SESSIONS</div>
         <button class="agent-secondary agent-chat-new" onclick="newVmChat()">＋ New</button>
       </div>
       <div id="vmChatList" class="agent-chat-list"><div class="storage-empty">No VM chats yet.</div></div>
-
-      <div class="agent-side-title">QUICK TASKS</div>
-      <div class="agent-quick-grid">
-        <button class="agent-quick" onclick="setVmAgentPreset('Report CPU load, RAM usage, swap usage, disk usage, and uptime. Flag anything unusual.','read')">System health</button>
-        <button class="agent-quick" onclick="setVmAgentPreset('Check disk usage and identify the largest directories or files that are safe to review. Do not delete anything.','read')">Disk review</button>
-        <button class="agent-quick" onclick="setVmAgentPreset('Check the status of CodePilot VM services, including codepilot-agent and codepilot-tunnel, and summarize any recent errors.','read')">Service status</button>
-        <button class="agent-quick" onclick="setVmAgentPreset('Inspect recent CodePilot agent and tunnel logs and summarize warnings or failures. Do not modify anything.','read')">Agent logs</button>
-        <button class="agent-quick" onclick="setVmAgentPreset('List the files and directories in the CodePilot workspace and summarize what is there.','read')">Workspace files</button>
-        <button class="agent-quick" onclick="setVmAgentPreset('Check Git status for repositories available in the workspace and report uncommitted changes. Do not modify anything.','read')">Git status</button>
-        <button class="agent-quick" onclick="setVmAgentPreset('Research the latest reliable information about the topic I give you next. Browse public sources, compare them, and cite the page titles and URLs you used.','read',true)">Web research</button>
-        <button class="agent-quick" onclick="setVmAgentPreset('Open the URL I give you next, inspect the rendered page, follow relevant links if needed, and summarize what you find.','read',true)">Inspect website</button>
-      </div>
 
       <div class="agent-system">
         <div class="agent-system-head">
@@ -461,10 +458,6 @@ body.auth-locked #authModal{display:grid!important;background:var(--bg)}
             <div class="agent-system-chip" data-vm-metric="tokens"><span>Tokens</span><b id="workerLastTokens">—</b></div>
             <div class="agent-system-chip" data-vm-metric="model"><span>Model</span><b id="workerLastModel">—</b></div>
             <div class="agent-system-chip" data-vm-metric="cost"><span>Cost</span><b id="workerLastCost">—</b></div>
-            <div class="agent-system-chip" data-vm-metric="recent"><span>Recent</span><b id="vmTaskCount">0</b></div>
-            <div class="agent-system-chip" data-vm-metric="success"><span>Success</span><b id="vmTaskSuccess">0</b></div>
-            <div class="agent-system-chip" data-vm-metric="mode"><span>Mode</span><b id="vmTaskLastMode">—</b></div>
-            <div class="agent-system-chip" data-vm-metric="last"><span>Last run</span><b id="vmTaskLastTime">—</b></div>
           </div>
         </div>
         <div id="vmSystemSettings" class="agent-system-settings hidden">
@@ -478,18 +471,9 @@ body.auth-locked #authModal{display:grid!important;background:var(--bg)}
           <label><input type="checkbox" data-vm-system-toggle="tokens" onchange="saveVmSystemPrefs()">Tokens</label>
           <label><input type="checkbox" data-vm-system-toggle="model" onchange="saveVmSystemPrefs()">Model</label>
           <label><input type="checkbox" data-vm-system-toggle="cost" onchange="saveVmSystemPrefs()">Cost</label>
-          <label><input type="checkbox" data-vm-system-toggle="recent" onchange="saveVmSystemPrefs()">Recent</label>
-          <label><input type="checkbox" data-vm-system-toggle="success" onchange="saveVmSystemPrefs()">Success</label>
-          <label><input type="checkbox" data-vm-system-toggle="mode" onchange="saveVmSystemPrefs()">Mode</label>
-          <label><input type="checkbox" data-vm-system-toggle="last" onchange="saveVmSystemPrefs()">Last run</label>
         </div>
       </div>
 
-      <div class="agent-side-title">RECENT TASKS</div>
-      <div id="vmAgentHistory" class="storage-list agent-history-list"><div class="storage-empty">No VM tasks yet.</div></div>
-      <div style="display:flex;gap:6px;margin-top:6px">
-        <button class="agent-secondary" onclick="clearVmAgentHistory()">Clear history</button>
-      </div>
     </aside>
 
     <main class="agent-main">
@@ -509,7 +493,7 @@ body.auth-locked #authModal{display:grid!important;background:var(--bg)}
           <label for="vmAgentMode" style="font-size:9px;color:var(--muted)">Mode</label>
           <select id="vmAgentMode">
             <option value="read">Read only</option>
-            <option value="workspace" selected>Workspace</option>
+            <option value="workspace" selected>Edit files</option>
           </select>
           <label for="vmAgentProvider" style="font-size:9px;color:var(--muted)">Brain</label>
           <select id="vmAgentProvider" title="Choose which AI handles this VM Agent request" onchange="vmAgentProviderChanged()">
@@ -528,7 +512,7 @@ body.auth-locked #authModal{display:grid!important;background:var(--bg)}
       </div>
 
       <div class="agent-transcript">
-        <div class="agent-welcome"><strong>Your VM is now a remote worker.</strong>Chat normally and keep adding follow-up commands while work is running. Queued commands stay attached to this chat and run in order. Read only inspects; Workspace can change files only inside <code>/srv/codepilot-workspace</code>.</div>
+        <div class="agent-welcome"><strong>Your VM is your CodePilot workspace.</strong>Choose a project or Random Chats, choose a brain, then chat normally. Read only inspects; Edit files can change files inside <code>/srv/codepilot-workspace</code>.</div>
         <div id="vmAgentConversation" class="agent-chat"></div>
         <div id="vmAgentMeta" class="vm-agent-meta agent-run-meta"></div>
       </div>
@@ -558,8 +542,7 @@ body.auth-locked #authModal{display:grid!important;background:var(--bg)}
       <div><strong>CodePilot VM Terminal</strong><br><span>Authenticated shell access through the existing Remote Worker tunnel</span></div>
     </div>
     <div class="agent-page-actions">
-      <button class="agent-page-tab" onclick="switchAppPage('workspace')">Workspace</button>
-      <button class="agent-page-tab" onclick="switchAppPage('agent')">VM Agent</button>
+      <button class="agent-page-tab" onclick="switchAppPage('agent')">← VM Agent</button>
       <button class="agent-page-tab active">Terminal</button>
       <button class="worker-status checking" onclick="checkVmAgent(true)" title="Check VM connection">VM</button>
     </div>
@@ -657,15 +640,15 @@ let pendingAttachments=[];
 let storageSnapshot=null;
 let vmMissionTimer=null;
 let vmStatusTimer=null;
-let vmActivePage="workspace";
-let vmChats=[], currentVmChat=null, vmAgentMessages=[], vmRemoteBusy=false;
+let vmActivePage="agent";
+let vmChats=[], currentVmChat=null, vmAgentMessages=[], vmRemoteBusy=false, vmProjectId="";
 let terminalCwd="/srv/codepilot-workspace", terminalHistory=[], terminalHistoryIndex=0;
 const ATTACH_MAX_FILES=5;
 const ATTACH_MAX_FILE_BYTES=500*1024;
 const ATTACH_MAX_TOTAL_BYTES=1024*1024;
 const ATTACH_ALLOWED_EXT=new Set(["html","htm","css","js","mjs","cjs","ts","jsx","tsx","json","md","txt","py","sql","xml","yaml","yml","csv"]);
 const VM_SYSTEM_PREFS_KEY="codepilot-vm-system-prefs-v1";
-const VM_SYSTEM_METRICS=["agent","browser","cpu","ram","disk","queue","duration","tokens","model","cost","recent","success","mode","last"];
+const VM_SYSTEM_METRICS=["agent","browser","cpu","ram","disk","queue","duration","tokens","model","cost"];
 const VM_SYSTEM_DEFAULT_METRICS=["agent","browser","cpu","ram","disk","queue"];
 
 /* =========================================================
@@ -843,6 +826,7 @@ function scheduleVmMissionPoll(delay=20000){
 }
 
 function switchAppPage(page){
+  page=page==="terminal"?"terminal":"agent";
   vmActivePage=page;
   const agent=document.getElementById("agentPage"),terminal=document.getElementById("terminalPage");
   agent?.classList.toggle("hidden",page!=="agent");
@@ -852,8 +836,8 @@ function switchAppPage(page){
   clearTimeout(vmStatusTimer);vmStatusTimer=null;
 
   if(page==="agent"){
-    renderVmAgentHistory();
-    if(!currentVmChat&&vmChats.length)openVmChat(vmChats[0].id);else renderVmAgentConversation();
+    const first=vmVisibleChats()[0];
+    if(!currentVmChat&&first)openVmChat(first.id);else renderVmAgentConversation();
     checkVmAgent(false);
     loadVmCapabilities().catch(()=>{});
     loadVmMissions().then(items=>{
@@ -870,7 +854,7 @@ function switchAppPage(page){
 }
 
 async function openVmAgent(){switchAppPage("agent");}
-function closeVmAgent(){switchAppPage("workspace");}
+function closeVmAgent(){switchAppPage("agent");}
 function vmAgentOuter(){}
 
 function setVmAgentPreset(prompt,mode="read",web=false){
@@ -894,12 +878,67 @@ function vmAgentProviderChanged(){
   }
 }
 
+function vmProjectIsKnown(id){return !!id&&projects.some(p=>p.id===id);}
+function vmChatGroupId(chat){return vmProjectIsKnown(chat?.project_id)?chat.project_id:"";}
+function vmVisibleChats(){return vmChats.filter(chat=>vmChatGroupId(chat)===vmProjectId);}
+
+function renderVmProjectSelect(){
+  const select=document.getElementById("vmProjectSelect");if(!select)return;
+  const selected=vmProjectIsKnown(vmProjectId)?vmProjectId:"";
+  vmProjectId=selected;
+  select.innerHTML='<option value="">Random Chats</option>';
+  projects.forEach(project=>{
+    const option=document.createElement("option");option.value=project.id;option.textContent=project.name;select.appendChild(option);
+  });
+  select.value=selected;
+}
+
+async function vmProjectChanged(){
+  const id=document.getElementById("vmProjectSelect")?.value||"";
+  vmProjectId=vmProjectIsKnown(id)?id:"";
+  currentVmChat=null;vmAgentMessages=[];
+  renderVmProjectSelect();renderVmChatSelect();renderVmAgentConversation();
+  const first=vmVisibleChats()[0];if(first)await openVmChat(first.id);
+  else document.getElementById("vmAgentTask")?.focus();
+}
+
+async function createVmProject(){
+  const name=await askInput("New project","Project name","New Project");if(!name)return;
+  try{
+    const d=await api("/projects",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({name})});
+    await loadProjects();vmProjectId=d.project?.id||"";renderVmProjectSelect();newVmChat();
+  }catch(e){alert(e.message)}
+}
+
+async function renameVmProject(){
+  if(!vmProjectId)return alert("Choose a project first.");
+  const project=projects.find(p=>p.id===vmProjectId);if(!project)return;
+  const name=await askInput("Rename project","Enter a new project name.",project.name||"Project");if(!name)return;
+  try{
+    await api("/projects/"+encodeURIComponent(project.id),{method:"PATCH",headers:{"Content-Type":"application/json"},body:JSON.stringify({name})});
+    await loadProjects();renderVmProjectSelect();
+  }catch(e){alert(e.message)}
+}
+
+async function deleteVmProject(){
+  if(!vmProjectId)return alert("Choose a project first.");
+  const project=projects.find(p=>p.id===vmProjectId);if(!project)return;
+  const ok=await askConfirm("Delete project?",'Delete "'+(project.name||"Project")+'"? Its VM chats will move to Random Chats.',{confirmLabel:"Delete",danger:true});if(!ok)return;
+  try{
+    await api("/projects/"+encodeURIComponent(project.id),{method:"DELETE"});
+    vmProjectId="";currentVmChat=null;vmAgentMessages=[];
+    await Promise.all([loadProjects(),loadVmChats(false)]);
+    renderVmProjectSelect();renderVmChatSelect();renderVmAgentConversation();
+  }catch(e){alert(e.message)}
+}
+
 async function loadVmChats(openRecent=false){
   try{
     const d=await api("/vm-agent/chats");
     vmChats=Array.isArray(d.chats)?d.chats:[];
-    renderVmChatSelect();
-    if(openRecent&&!currentVmChat&&vmChats.length)await openVmChat(vmChats[0].id);
+    renderVmProjectSelect();renderVmChatSelect();
+    const first=vmVisibleChats()[0];
+    if(openRecent&&!currentVmChat&&first)await openVmChat(first.id);
   }catch(e){
     vmChats=[];renderVmChatSelect();
     document.getElementById("vmAgentMeta").textContent="VM chat history unavailable · "+(e.message||e);
@@ -923,11 +962,12 @@ function vmChatRelativeTime(value){
 function renderVmChatList(){
   const list=document.getElementById("vmChatList");if(!list)return;
   list.innerHTML="";
-  if(!vmChats.length){
-    const empty=document.createElement("div");empty.className="storage-empty";empty.textContent="No VM chats yet.";list.appendChild(empty);return;
+  const visible=vmVisibleChats();
+  if(!visible.length){
+    const empty=document.createElement("div");empty.className="storage-empty";empty.textContent=vmProjectId?"No chats in this project yet.":"No random chats yet.";list.appendChild(empty);return;
   }
   const active=currentVmChat?.id||"";
-  vmChats.forEach(chat=>{
+  visible.forEach(chat=>{
     const row=document.createElement("button");row.type="button";row.className="agent-chat-row"+(chat.id===active?" active":"");
     row.onclick=()=>openVmChat(chat.id);
     const title=document.createElement("div");title.className="agent-chat-row-title";title.textContent=chat.title||"VM Chat";
@@ -943,12 +983,13 @@ function renderVmChatList(){
 function renderVmChatSelect(){
   const select=document.getElementById("vmChatSelect");if(!select)return;
   const active=currentVmChat?.id||"";
-  select.innerHTML='<option value="">New VM Chat</option>';
-  vmChats.forEach(chat=>{
+  const visible=vmVisibleChats();
+  select.innerHTML='<option value="">New Chat</option>';
+  visible.forEach(chat=>{
     const option=document.createElement("option");
     option.value=chat.id;option.textContent=(chat.title||"VM Chat")+" · "+vmBrainLabel(chat.provider);select.appendChild(option);
   });
-  select.value=vmChats.some(x=>x.id===active)?active:"";
+  select.value=visible.some(x=>x.id===active)?active:"";
   renderVmChatList();
 }
 
@@ -966,6 +1007,8 @@ async function openVmChat(id){
       id:m.id,role:m.role,text:m.content||"",at:m.created_at,mode:m.mode||"read",web:!!Number(m.web),error:!!Number(m.error)
     }));
     if(currentVmChat){
+      vmProjectId=vmChatGroupId(currentVmChat);
+      renderVmProjectSelect();
       document.getElementById("vmAgentMode").value=currentVmChat.mode||"read";
       document.getElementById("vmAgentWeb").checked=!!Number(currentVmChat.web);
       const brain=document.getElementById("vmAgentProvider");
@@ -997,7 +1040,7 @@ async function ensureVmChat(firstPrompt,mode,web,provider){
   const title=String(firstPrompt||"New VM Chat").replace(/\s+/g," ").trim().slice(0,58)||"New VM Chat";
   const d=await api("/vm-agent/chats",{
     method:"POST",headers:{"Content-Type":"application/json"},
-    body:JSON.stringify({title,mode,web,provider})
+    body:JSON.stringify({title,mode,web,provider,projectId:vmProjectId||null})
   });
   currentVmChat=d.chat;
   await loadVmChats(false);
@@ -1035,7 +1078,7 @@ async function deleteVmChat(){
     await api("/vm-agent/chats/"+encodeURIComponent(currentVmChat.id),{method:"DELETE"});
     currentVmChat=null;vmAgentMessages=[];
     await loadVmChats(false);renderVmAgentConversation();
-    if(vmChats.length)await openVmChat(vmChats[0].id);
+    const first=vmVisibleChats()[0];if(first)await openVmChat(first.id);
   }catch(e){alert(e.message)}
 }
 
@@ -1630,6 +1673,7 @@ async function loadProjects(){
   const d=await api("/projects");
   projects=Array.isArray(d.projects)?d.projects:[];
   renderProjectSelect();
+  renderVmProjectSelect();
 }
 
 function renderProjectSelect(){
