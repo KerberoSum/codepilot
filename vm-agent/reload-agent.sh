@@ -29,6 +29,24 @@ for provider in chatgpt_codex gemini_oauth; do
   fi
 done
 
+# Import only the OpenRouter credential from the Ubuntu desktop Goose profile.
+# Keep any other service-account Goose secrets intact.
+ubuntu_goose_secrets="/home/ubuntu/.config/goose/secrets.yaml"
+service_goose_secrets="$GOOSE_CFG/secrets.yaml"
+if [ -s "$ubuntu_goose_secrets" ]; then
+  openrouter_line="$(grep -m1 '^OPENROUTER_API_KEY:' "$ubuntu_goose_secrets" || true)"
+  if [ -n "$openrouter_line" ]; then
+    temp_secrets="$(mktemp)"
+    if [ -f "$service_goose_secrets" ]; then
+      grep -v '^OPENROUTER_API_KEY:' "$service_goose_secrets" > "$temp_secrets" || true
+    fi
+    printf '%s\n' "$openrouter_line" >> "$temp_secrets"
+    install -m 0600 -o codepilot-agent -g codepilot-agent "$temp_secrets" "$service_goose_secrets"
+    rm -f "$temp_secrets"
+    echo "Imported Goose secret: OPENROUTER_API_KEY"
+  fi
+fi
+
 systemctl restart codepilot-agent
 
 # Verify Bubblewrap under the service account, then verify the API.
