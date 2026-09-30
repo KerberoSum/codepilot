@@ -5,6 +5,7 @@ import secrets
 import shutil
 import socket
 import subprocess
+import tempfile
 import time
 import urllib.request
 import uuid
@@ -636,6 +637,8 @@ async def execute(req: TaskRequest, wait_for_slot: bool = False, mission_id: Opt
         model_name = provider_model_name(req)
         command = provider_command(req, full_prompt, native_session_id)
         proc = None
+        cursor_stdout_file = None
+        cursor_stderr_file = None
         started_at = now_iso()
         started_monotonic = time.monotonic()
         active_task = {
@@ -653,22 +656,32 @@ async def execute(req: TaskRequest, wait_for_slot: bool = False, mission_id: Opt
         try:
             if active_task and active_task.get("id") == task_id:
                 active_task["stage"] = req.provider + "_running"
+            if req.provider == "cursor":
+                cursor_stdout_file = tempfile.TemporaryFile()
+                cursor_stderr_file = tempfile.TemporaryFile()
             proc = await asyncio.create_subprocess_exec(
                 *command,
                 cwd=str(WORKSPACE),
                 stdin=asyncio.subprocess.PIPE if req.provider == "chatgpt_desktop" else None,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
+                stdout=cursor_stdout_file if req.provider == "cursor" else asyncio.subprocess.PIPE,
+                stderr=cursor_stderr_file if req.provider == "cursor" else asyncio.subprocess.PIPE,
                 env=os.environ.copy(),
             )
             active_task_process = proc
             if mission_id:
                 active_processes[mission_id] = proc
-            stdin_payload = full_prompt.encode("utf-8") if req.provider == "chatgpt_desktop" else None
-            stdout, stderr = await asyncio.wait_for(
-                proc.communicate(input=stdin_payload),
-                timeout=TASK_TIMEOUT,
-            )
+            if req.provider == "cursor":
+                await asyncio.wait_for(proc.wait(), timeout=TASK_TIMEOUT)
+                stdout_size = os.fstat(cursor_stdout_file.fileno()).st_size
+                stderr_size = os.fstat(cursor_stderr_file.fileno()).st_size
+                stdout = os.pread(cursor_stdout_file.fileno(), stdout_size, 0)
+                stderr = os.pread(cursor_stderr_file.fileno(), stderr_size, 0)
+            else:
+                stdin_payload = full_prompt.encode("utf-8") if req.provider == "chatgpt_desktop" else None
+                stdout, stderr = await asyncio.wait_for(
+                    proc.communicate(input=stdin_payload),
+                    timeout=TASK_TIMEOUT,
+                )
         except asyncio.TimeoutError:
             if proc:
                 try:
@@ -691,6 +704,12 @@ async def execute(req: TaskRequest, wait_for_slot: bool = False, mission_id: Opt
             if mission_id:
                 active_processes.pop(mission_id, None)
             active_task_process = None
+            for handle in (cursor_stdout_file, cursor_stderr_file):
+                if handle is not None:
+                    try:
+                        handle.close()
+                    except Exception:
+                        pass
             if active_task and active_task.get("id") == task_id:
                 active_task = None
 
