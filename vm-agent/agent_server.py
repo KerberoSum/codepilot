@@ -52,7 +52,7 @@ PROVIDER_SESSION_STATE.parent.mkdir(parents=True, exist_ok=True)
 class TaskRequest(BaseModel):
     prompt: str = Field(min_length=1, max_length=8000)
     mode: Literal["read", "workspace"] = "read"
-    provider: Literal["openrouter", "codex", "grok", "cursor"] = "openrouter"
+    provider: Literal["chatgpt", "openrouter", "gemini", "codex", "grok", "cursor"] = "chatgpt"
     web: bool = False
     chat_id: Optional[str] = Field(default=None, max_length=128)
     context_prompt: Optional[str] = Field(default=None, max_length=16000)
@@ -94,7 +94,7 @@ def provider_session_key(req: TaskRequest) -> str:
 
 
 def get_provider_session(req: TaskRequest) -> Optional[str]:
-    if not req.chat_id or req.provider == "openrouter":
+    if not req.chat_id or req.provider in {"chatgpt", "openrouter", "gemini"}:
         return None
     chat = provider_sessions.get(req.chat_id)
     if not isinstance(chat, dict):
@@ -107,7 +107,7 @@ def get_provider_session(req: TaskRequest) -> Optional[str]:
 
 
 def set_provider_session(req: TaskRequest, session_id: str):
-    if not req.chat_id or req.provider == "openrouter" or not session_id:
+    if not req.chat_id or req.provider in {"chatgpt", "openrouter", "gemini"} or not session_id:
         return
     chat = provider_sessions.setdefault(req.chat_id, {})
     chat[provider_session_key(req)] = {
@@ -168,10 +168,32 @@ def browser_capability() -> dict:
 
 
 def provider_capabilities() -> dict:
+    goose = bool(command_path(GOOSE_BIN))
+    goose_config = Path.home() / ".config" / "goose"
     return {
-        "openrouter": {"label": "OpenRouter / Goose", "available": bool(command_path(GOOSE_BIN)), "default": True, "persistent": False},
+        "chatgpt": {
+            "label": "ChatGPT / OpenAI",
+            "available": goose and (goose_config / "chatgpt_codex").exists(),
+            "default": True,
+            "persistent": False,
+            "runner": "Goose",
+        },
+        "openrouter": {
+            "label": "OpenRouter / Goose",
+            "available": goose,
+            "default": False,
+            "persistent": False,
+            "runner": "Goose",
+        },
+        "gemini": {
+            "label": "Gemini",
+            "available": goose and (goose_config / "gemini_oauth").exists(),
+            "default": False,
+            "persistent": False,
+            "runner": "Goose",
+        },
         "codex": {"label": "OpenAI Codex", "available": bool(command_path(CODEX_BIN)), "default": False, "persistent": True},
-        "grok": {"label": "Grok Build", "available": bool(command_path(GROK_BIN)), "default": False, "persistent": True},
+        "grok": {"label": "Grok", "available": bool(command_path(GROK_BIN)), "default": False, "persistent": True},
         "cursor": {"label": "Cursor Agent", "available": bool(command_path(CURSOR_BIN)), "default": False, "persistent": True},
     }
 
@@ -242,8 +264,13 @@ Do not browse websites or make outbound web requests for this task. If current o
     return rules + "\n" + web_rules + "\nUSER TASK:\n" + (task_prompt if task_prompt is not None else req.prompt)
 
 
-def goose_command(full_prompt: str):
-    return [
+def goose_command(full_prompt: str, provider: str = "chatgpt"):
+    provider_name = {
+        "chatgpt": "chatgpt_codex",
+        "openrouter": "openrouter",
+        "gemini": "gemini_oauth",
+    }.get(provider, "chatgpt_codex")
+    command = [
         GOOSE_BIN,
         "run",
         "--text",
@@ -257,17 +284,28 @@ def goose_command(full_prompt: str):
         "--no-profile",
         "--with-builtin",
         "developer,skills",
+        "--provider",
+        provider_name,
     ]
+    if provider == "openrouter":
+        command.extend(["--model", os.environ.get("GOOSE_OPENROUTER_MODEL", "openrouter/free")])
+    return command
 
 
 def provider_model_name(req: TaskRequest) -> str:
+    if req.provider == "chatgpt":
+        return "ChatGPT / OpenAI"
+    if req.provider == "openrouter":
+        return os.environ.get("GOOSE_OPENROUTER_MODEL", "openrouter/free")
+    if req.provider == "gemini":
+        return "Gemini"
     if req.provider == "codex":
         return "OpenAI Codex"
     if req.provider == "grok":
-        return "Grok Build"
+        return "Grok"
     if req.provider == "cursor":
         return "Cursor Agent"
-    return os.environ.get("GOOSE_MODEL", "openrouter/free")
+    return req.provider
 
 
 def provider_command(req: TaskRequest, full_prompt: str, session_id: Optional[str] = None):
@@ -310,8 +348,10 @@ def provider_command(req: TaskRequest, full_prompt: str, session_id: Optional[st
         if session_id:
             command.append("--resume=" + session_id)
         command.append(full_prompt)
+    elif req.provider in {"chatgpt", "openrouter", "gemini"}:
+        command = goose_command(full_prompt, req.provider)
     else:
-        command = goose_command(full_prompt)
+        raise HTTPException(status_code=400, detail="Unsupported VM Agent provider")
     resolved = command_path(command[0])
     if not resolved:
         raise HTTPException(status_code=503, detail=provider_model_name(req) + " is not installed for the VM Agent")
@@ -470,7 +510,7 @@ async def execute(req: TaskRequest, wait_for_slot: bool = False, mission_id: Opt
     async with task_lock:
         task_id = mission_id or uuid.uuid4().hex[:12]
         native_session_id = get_provider_session(req)
-        if req.provider == "openrouter":
+        if req.provider in {"chatgpt", "openrouter", "gemini"}:
             provider_prompt = req.context_prompt or req.prompt
         elif native_session_id:
             provider_prompt = req.prompt
@@ -568,7 +608,7 @@ async def execute(req: TaskRequest, wait_for_slot: bool = False, mission_id: Opt
             raise HTTPException(status_code=502, detail=detail or "Goose failed")
 
         try:
-            if req.provider == "openrouter":
+            if req.provider in {"chatgpt", "openrouter", "gemini"}:
                 try:
                     payload = json.loads(stdout.decode("utf-8"))
                 except Exception:
@@ -600,7 +640,7 @@ async def execute(req: TaskRequest, wait_for_slot: bool = False, mission_id: Opt
             raise
 
         session_id = result.pop("_session_id", None)
-        if session_id and req.chat_id and req.provider != "openrouter":
+        if session_id and req.chat_id and req.provider not in {"chatgpt", "openrouter", "gemini"}:
             set_provider_session(req, str(session_id))
             result["native_session"] = {
                 "id": str(session_id),
