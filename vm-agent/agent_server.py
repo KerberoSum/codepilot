@@ -15,7 +15,7 @@ from pathlib import Path
 from typing import Dict, Literal, Optional
 
 from fastapi import FastAPI, Header, HTTPException
-from fastapi.responses import StreamingResponse
+from fastapi.responses import Response, StreamingResponse
 from pydantic import BaseModel, Field
 
 app = FastAPI(title="CodePilot Remote Worker", version="3.5")
@@ -29,6 +29,7 @@ CHATGPT_DESKTOP_BRIDGE = Path(os.environ.get("CHATGPT_DESKTOP_BRIDGE", "/srv/cod
 CHATGPT_DESKTOP_CDP_LIST = os.environ.get("CHATGPT_DESKTOP_CDP_LIST", "http://127.0.0.1:9223/json/list")
 TRAILBLAZE_BIN = os.environ.get("TRAILBLAZE_BIN", "trailblaze")
 TRAILBLAZE_PORT = int(os.environ.get("TRAILBLAZE_PORT", "52525"))
+DESKTOP_RELAY_URL = os.environ.get("CODEPILOT_DESKTOP_RELAY_URL", "http://127.0.0.1:8770").rstrip("/")
 WORKSPACE = Path(os.environ.get("CODEPILOT_WORKSPACE", "/srv/codepilot-workspace")).resolve()
 STATE_FILE = Path(os.environ.get("CODEPILOT_MISSION_STATE", "/srv/codepilot-agent/missions.json")).resolve()
 PROVIDER_SESSION_STATE = Path(os.environ.get("CODEPILOT_PROVIDER_SESSION_STATE", "/srv/codepilot-agent/provider-sessions.json")).resolve()
@@ -70,6 +71,17 @@ class MissionRequest(TaskRequest):
 class TerminalRequest(BaseModel):
     command: str = Field(min_length=1, max_length=6000)
     cwd: Optional[str] = Field(default=None, max_length=1200)
+
+
+class DesktopInputRequest(BaseModel):
+    type: Literal["move", "mouse_down", "mouse_up", "click", "wheel", "text", "key", "chord"]
+    x: Optional[float] = None
+    y: Optional[float] = None
+    button: int = Field(default=1, ge=1, le=7)
+    deltaY: float = 0
+    text: str = Field(default="", max_length=500)
+    key: str = Field(default="", max_length=32)
+    keys: list[str] = Field(default_factory=list, max_length=4)
 
 
 def now_iso() -> str:
@@ -164,6 +176,32 @@ def tcp_ready(host: str, port: int, timeout: float = 0.15) -> bool:
             return True
     except OSError:
         return False
+
+
+def desktop_relay_call(path: str, method: str = "GET", body: Optional[dict] = None, timeout: float = 12.0):
+    data = None
+    headers = {}
+    if body is not None:
+        data = json.dumps(body).encode("utf-8")
+        headers["Content-Type"] = "application/json"
+    request = urllib.request.Request(
+        DESKTOP_RELAY_URL + path,
+        data=data,
+        headers=headers,
+        method=method,
+    )
+    with urllib.request.urlopen(request, timeout=timeout) as response:
+        return response.status, dict(response.headers.items()), response.read()
+
+
+def desktop_capability() -> dict:
+    available = tcp_ready("127.0.0.1", 8770, timeout=0.2)
+    return {
+        "available": available,
+        "transport": "https-polling",
+        "websocket": False,
+        "relay": "CodePilot Desktop Relay" if available else None,
+    }
 
 
 def browser_capability() -> dict:
@@ -966,6 +1004,7 @@ async def health():
         "queued_missions": sum(1 for item in missions.values() if item.get("status") == "queued"),
         "queued_commands": sum(1 for item in missions.values() if item.get("status") == "queued"),
         "browser": {"available": browser["available"], "controller": browser["controller"]},
+        "desktop": desktop_capability(),
         "providers": provider_capabilities(),
         "system": system_snapshot(),
     }
@@ -983,6 +1022,7 @@ async def capabilities(authorization: Optional[str] = Header(default=None)):
         "terminal": True,
         "workspace": str(WORKSPACE),
         "browser": browser,
+        "desktop": desktop_capability(),
         "providers": provider_capabilities(),
         "system": system_snapshot(),
         "queue": {
@@ -997,6 +1037,40 @@ async def capabilities(authorization: Optional[str] = Header(default=None)):
             "concurrency": 1,
         },
     }
+
+
+@app.get("/desktop/frame")
+async def desktop_frame(authorization: Optional[str] = Header(default=None)):
+    require_auth(authorization)
+    try:
+        status, headers, raw = await asyncio.to_thread(desktop_relay_call, "/frame", "GET", None, 12.0)
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail=f"Desktop relay unavailable: {exc}")
+    if status != 200:
+        raise HTTPException(status_code=503, detail="Desktop relay did not return a frame.")
+    response_headers = {
+        "Cache-Control": "no-store, max-age=0",
+        "X-CodePilot-Width": headers.get("X-CodePilot-Width", ""),
+        "X-CodePilot-Height": headers.get("X-CodePilot-Height", ""),
+    }
+    return Response(content=raw, media_type=headers.get("Content-Type", "image/jpeg"), headers=response_headers)
+
+
+@app.post("/desktop/input")
+async def desktop_input(req: DesktopInputRequest, authorization: Optional[str] = Header(default=None)):
+    require_auth(authorization)
+    payload = req.model_dump(exclude_none=True) if hasattr(req, "model_dump") else req.dict(exclude_none=True)
+    try:
+        status, _headers, raw = await asyncio.to_thread(desktop_relay_call, "/input", "POST", payload, 8.0)
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail=f"Desktop relay unavailable: {exc}")
+    try:
+        result = json.loads(raw.decode("utf-8")) if raw else {}
+    except Exception:
+        result = {}
+    if status != 200 or not result.get("ok"):
+        raise HTTPException(status_code=502, detail=result.get("error") or "Desktop input failed.")
+    return result
 
 
 @app.get("/agent/status")
