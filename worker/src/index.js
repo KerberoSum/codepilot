@@ -548,6 +548,46 @@ export default {
         });
       }
 
+      if (path === "/vm-desktop/frame" && request.method === "GET") {
+        if (!env.VM_AGENT_SECRET) {
+          return json({ success: false, error: "VM Agent secret is not configured." }, 503);
+        }
+        const vmBase = await getVmAgentBase();
+        if (!vmBase) {
+          return json({ success: false, error: "VM Agent URL is not configured or registered." }, 503);
+        }
+        const upstream = await fetch(vmBase + "/desktop/frame", {
+          method: "GET",
+          headers: { "Authorization": "Bearer " + String(env.VM_AGENT_SECRET).trim() },
+          signal: AbortSignal.timeout(15000)
+        });
+        const headers = new Headers();
+        headers.set("Content-Type", upstream.headers.get("content-type") || "image/jpeg");
+        headers.set("Cache-Control", "no-store, max-age=0");
+        const width = upstream.headers.get("x-codepilot-width");
+        const height = upstream.headers.get("x-codepilot-height");
+        if (width) headers.set("X-CodePilot-Width", width);
+        if (height) headers.set("X-CodePilot-Height", height);
+        return new Response(upstream.body, { status: upstream.status, headers });
+      }
+
+      if (path === "/vm-desktop/input" && request.method === "POST") {
+        const body = await safeJSON(request);
+        if (!body || typeof body !== "object") {
+          return json({ success: false, error: "Invalid desktop input payload." }, 400);
+        }
+        try {
+          const result = await callVmAgentJson("/desktop/input", {
+            method: "POST",
+            body,
+            timeout: 10000
+          });
+          return json(result);
+        } catch (error) {
+          return json({ success: false, error: error.message || "Desktop input failed." }, error.status || 502);
+        }
+      }
+
       if (
         path === "/vm-llm/v1/chat/completions" &&
         request.method === "POST"
