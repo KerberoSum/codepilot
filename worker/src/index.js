@@ -143,6 +143,40 @@ export default {
         }
       }
 
+      async function issueRemoteSessionToken() {
+        const expiresAt = Date.now() + 60 * 60 * 1000;
+        const nonce = crypto.randomUUID();
+        const payload = `remote.${expiresAt}.${nonce}`;
+        const signature = await signSession(payload);
+        return { token: `${payload}.${bytesToBase64Url(signature)}`, expiresAt };
+      }
+
+      async function verifyRemoteSessionToken(token) {
+        try {
+          if (!env.CODEPILOT_SESSION_SECRET) return false;
+          const parts = String(token || "").split(".");
+          if (parts.length !== 4 || parts[0] !== "remote") return false;
+          const [, expiresText, nonce, signatureText] = parts;
+          const expiresAt = Number(expiresText);
+          if (!Number.isFinite(expiresAt) || expiresAt <= Date.now() || !nonce) return false;
+          const expected = await signSession(`remote.${expiresText}.${nonce}`);
+          const actual = base64UrlToBytes(signatureText);
+          return constantTimeEqual(expected, actual);
+        } catch {
+          return false;
+        }
+      }
+
+      function cookieValue(name) {
+        const raw = request.headers.get("Cookie") || "";
+        for (const part of raw.split(";")) {
+          const index = part.indexOf("=");
+          if (index < 0) continue;
+          if (part.slice(0, index).trim() === name) return part.slice(index + 1).trim();
+        }
+        return "";
+      }
+
       async function requestIsAuthenticated() {
         const header = request.headers.get("Authorization") || "";
         const match = header.match(/^Bearer\s+(.+)$/i);
@@ -166,6 +200,27 @@ export default {
             updated_at TEXT NOT NULL
           )
         `).run();
+      }
+
+      async function ensureRemoteDesktopRuntimeTable() {
+        await env.DB.prepare(`
+          CREATE TABLE IF NOT EXISTS remote_desktop_runtime (
+            id INTEGER PRIMARY KEY CHECK (id = 1),
+            url TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+          )
+        `).run();
+      }
+
+      async function getRemoteDesktopBase() {
+        try {
+          await ensureRemoteDesktopRuntimeTable();
+          const row = await env.DB.prepare(
+            "SELECT url FROM remote_desktop_runtime WHERE id = 1"
+          ).first();
+          if (row?.url) return String(row.url).trim().replace(/\/+$/, "");
+        } catch {}
+        return String(env.REMOTE_DESKTOP_URL || "").trim().replace(/\/+$/, "");
       }
 
       async function ensureVmChatTables() {
@@ -374,6 +429,123 @@ export default {
           ON CONFLICT(id) DO UPDATE SET url = excluded.url, updated_at = excluded.updated_at
         `).bind(candidate, new Date().toISOString()).run();
         return json({ success: true, registered: true, host: parsed.hostname });
+      }
+
+      if (
+        path === "/remote-desktop/register" &&
+        request.method === "POST"
+      ) {
+        if (!(await bearerMatches(env.VM_AGENT_REGISTRATION_SECRET))) {
+          return json({ success: false, error: "Unauthorized." }, 401);
+        }
+        const body = await safeJSON(request);
+        const candidate = String(body?.url || "").trim().replace(/\/+$/, "");
+        let parsed;
+        try { parsed = new URL(candidate); } catch {}
+        if (!parsed || parsed.protocol !== "https:" || !parsed.hostname.endsWith(".trycloudflare.com")) {
+          return json({ success: false, error: "A valid HTTPS trycloudflare.com URL is required." }, 400);
+        }
+        await ensureRemoteDesktopRuntimeTable();
+        await env.DB.prepare(`
+          INSERT INTO remote_desktop_runtime (id, url, updated_at)
+          VALUES (1, ?, ?)
+          ON CONFLICT(id) DO UPDATE SET url = excluded.url, updated_at = excluded.updated_at
+        `).bind(candidate, new Date().toISOString()).run();
+        return json({ success: true, registered: true, host: parsed.hostname });
+      }
+
+      if (path === "/remote/session" && request.method === "POST") {
+        let supplied = "";
+        try {
+          const form = await request.formData();
+          supplied = String(form.get("token") || "");
+        } catch {}
+        if (!(await verifySessionToken(supplied))) {
+          return new Response("CodePilot session expired. Sign in again, then reopen Remote Desktop.", {
+            status: 401,
+            headers: { "Content-Type": "text/plain; charset=UTF-8", "Cache-Control": "no-store" }
+          });
+        }
+        const remoteSession = await issueRemoteSessionToken();
+        const headers = new Headers();
+        headers.set("Location", "/remote/");
+        headers.set("Cache-Control", "no-store");
+        headers.set(
+          "Set-Cookie",
+          "codepilot_remote=" + remoteSession.token +
+          "; Max-Age=3600; Path=/remote; HttpOnly; Secure; SameSite=Lax"
+        );
+        return new Response(null, { status: 303, headers });
+      }
+
+      if (path === "/remote" || path.startsWith("/remote/")) {
+        const remoteToken = cookieValue("codepilot_remote");
+        if (!(await verifyRemoteSessionToken(remoteToken))) {
+          return new Response(
+            "<!doctype html><meta charset=\"utf-8\"><title>CodePilot Remote Desktop</title>" +
+            "<style>body{font:16px system-ui;background:#0b1018;color:#e7edf5;padding:40px}a{color:#9f8cff}</style>" +
+            "<h2>Remote Desktop session expired</h2><p>Return to CodePilot and press <b>Remote Desktop</b> again.</p>",
+            { status: 401, headers: { "Content-Type": "text/html; charset=UTF-8", "Cache-Control": "no-store" } }
+          );
+        }
+
+        const remoteBase = await getRemoteDesktopBase();
+        if (!remoteBase) {
+          return new Response("Remote Desktop tunnel is not registered.", {
+            status: 503,
+            headers: { "Content-Type": "text/plain; charset=UTF-8", "Cache-Control": "no-store" }
+          });
+        }
+
+        const rawPath = url.pathname.slice("/remote".length) || "/";
+        const upstreamUrl = remoteBase + (rawPath.startsWith("/") ? rawPath : "/" + rawPath) + url.search;
+        const upstreamHeaders = new Headers(request.headers);
+        upstreamHeaders.delete("Authorization");
+        upstreamHeaders.delete("Host");
+        const originalCookies = request.headers.get("Cookie") || "";
+        const forwardedCookies = originalCookies
+          .split(";")
+          .map(part => part.trim())
+          .filter(part => part && !part.startsWith("codepilot_remote="))
+          .join("; ");
+        if (forwardedCookies) upstreamHeaders.set("Cookie", forwardedCookies);
+        else upstreamHeaders.delete("Cookie");
+        try {
+          const origin = new URL(remoteBase).origin;
+          if (upstreamHeaders.has("Origin")) upstreamHeaders.set("Origin", origin);
+          if (upstreamHeaders.has("Referer")) upstreamHeaders.set("Referer", remoteBase + "/");
+        } catch {}
+
+        const upstream = await fetch(upstreamUrl, {
+          method: request.method,
+          headers: upstreamHeaders,
+          body: ["GET", "HEAD"].includes(request.method) ? undefined : request.body,
+          redirect: "manual"
+        });
+
+        if (upstream.status === 101) return upstream;
+
+        const responseHeaders = new Headers(upstream.headers);
+        responseHeaders.set("Cache-Control", responseHeaders.get("Cache-Control") || "no-store");
+        const location = responseHeaders.get("Location");
+        if (location) {
+          try {
+            const absolute = new URL(location, remoteBase + "/");
+            const baseOrigin = new URL(remoteBase).origin;
+            if (absolute.origin === baseOrigin) {
+              responseHeaders.set("Location", "/remote" + absolute.pathname + absolute.search + absolute.hash);
+            }
+          } catch {}
+        }
+        const setCookie = responseHeaders.get("Set-Cookie");
+        if (setCookie) {
+          responseHeaders.set("Set-Cookie", setCookie.replace(/Path=\//i, "Path=/remote/"));
+        }
+        return new Response(upstream.body, {
+          status: upstream.status,
+          statusText: upstream.statusText,
+          headers: responseHeaders
+        });
       }
 
       if (
