@@ -167,7 +167,9 @@ body.auth-locked #authModal{display:grid!important;background:var(--bg)}
 .agent-chat-session-head{display:flex;align-items:center;justify-content:space-between;gap:6px;margin-bottom:5px}.agent-chat-session-head .agent-side-title{margin:0}.agent-chat-new{padding:4px 7px;font-size:8px}
 .agent-project-row{display:flex;gap:4px;align-items:center;margin-bottom:8px}.agent-project-select{min-width:0;flex:1;border:1px solid var(--border);background:var(--panel2);color:#fff;border-radius:7px;padding:7px 8px;font-size:9px}.agent-project-actions{display:flex;gap:2px}.agent-project-actions .icon-btn{border:1px solid var(--border);background:var(--panel2);padding:5px 6px;font-size:9px}
 .agent-chat-list{display:flex;flex-direction:column;gap:4px;flex:1 1 auto;min-height:0;max-height:none;overflow:auto;margin-bottom:6px;padding-bottom:4px}
-.agent-chat-row{width:100%;border:1px solid var(--border);background:var(--panel2);border-radius:8px;padding:7px 8px;text-align:left;color:var(--text)}.agent-chat-row:hover{background:var(--panel3)}.agent-chat-row.active{border-color:rgba(116,87,255,.72);background:rgba(116,87,255,.12)}
+.agent-chat-row-wrap{position:relative;min-width:0}
+.agent-chat-row{width:100%;border:1px solid var(--border);background:var(--panel2);border-radius:8px;padding:7px 34px 7px 8px;text-align:left;color:var(--text)}.agent-chat-row:hover{background:var(--panel3)}.agent-chat-row.active{border-color:rgba(116,87,255,.72);background:rgba(116,87,255,.12)}
+.agent-chat-delete{position:absolute;right:6px;top:6px;width:24px;height:24px;display:grid;place-items:center;border:1px solid transparent;border-radius:6px;background:transparent;color:var(--muted);font-size:11px;line-height:1}.agent-chat-delete:hover{color:var(--red);border-color:rgba(255,102,125,.35);background:rgba(255,102,125,.08)}
 .agent-chat-row-title{font-size:9px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-bottom:4px}
 .agent-chat-row-meta{display:flex;align-items:center;gap:5px;color:var(--muted);font-size:7px;min-width:0}.agent-brain-badge{border:1px solid var(--border);border-radius:999px;padding:2px 5px;color:#d9e0e9;background:var(--panel3);white-space:nowrap}.agent-chat-last-read{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .agent-compact-strip{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:4px;margin-bottom:8px}.agent-compact-stat{border:1px solid var(--border);background:var(--panel2);border-radius:7px;padding:5px 6px;min-width:0}.agent-compact-stat span{display:block;font-size:7px;color:var(--muted);margin-bottom:1px}.agent-compact-stat b{display:block;font-size:9px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
@@ -413,6 +415,7 @@ body.auth-locked #authModal{display:grid!important;background:var(--bg)}
       <div><strong>CodePilot</strong><br><span>Projects, random chats, AI brains, and your Oracle VM in one place</span></div>
     </div>
     <div class="agent-page-actions">
+      <button class="agent-page-tab" onclick="openRemoteDesktop()">Remote Desktop</button>
       <button class="agent-page-tab" onclick="switchAppPage('terminal')">Terminal</button>
       <button class="worker-status checking" onclick="checkVmAgent(true)" title="Check VM connection"><span id="agentHeaderStatus">Checking</span></button>
     </div>
@@ -736,6 +739,21 @@ async function login(){
 function authKeydown(e){if(e.key==="Enter"){e.preventDefault();login();}}
 function logout(){clearAuthToken();currentChat=null;messages=[];showLogin();}
 
+function openRemoteDesktop(){
+  if(!authToken){showLogin();return;}
+  const form=document.createElement("form");
+  form.method="POST";
+  form.action=API_BASE_URL+"/remote/session";
+  form.target="_blank";
+  form.style.display="none";
+  const token=document.createElement("input");
+  token.type="hidden";token.name="token";token.value=authToken;
+  form.appendChild(token);
+  document.body.appendChild(form);
+  form.submit();
+  setTimeout(()=>form.remove(),1000);
+}
+
 function setWorkerIndicator(state,label,title=""){
   const el=document.getElementById("workerStatus");if(!el)return;
   el.className="worker-status "+state;el.textContent=label;el.title=title||"Run Worker diagnostics";
@@ -985,6 +1003,7 @@ function renderVmChatList(){
   }
   const active=currentVmChat?.id||"";
   visible.forEach(chat=>{
+    const wrap=document.createElement("div");wrap.className="agent-chat-row-wrap";
     const row=document.createElement("button");row.type="button";row.className="agent-chat-row"+(chat.id===active?" active":"");
     row.onclick=()=>openVmChat(chat.id);
     const title=document.createElement("div");title.className="agent-chat-row-title";title.textContent=chat.title||"VM Chat";
@@ -993,7 +1012,9 @@ function renderVmChatList(){
     const last=document.createElement("span");last.className="agent-chat-last-read";
     const stamp=Number(chat.last_read_at||chat.updated_at||0);last.textContent="Last read "+vmChatRelativeTime(stamp);
     if(stamp){try{last.title=new Date(stamp).toLocaleString()}catch{}}
-    meta.append(brain,last);row.append(title,meta);list.appendChild(row);
+    const remove=document.createElement("button");remove.type="button";remove.className="agent-chat-delete";remove.title="Delete chat";remove.setAttribute("aria-label","Delete "+(chat.title||"VM Chat"));remove.textContent="⌫";
+    remove.onclick=e=>{e.stopPropagation();deleteVmChatById(chat.id)};
+    meta.append(brain,last);row.append(title,meta);wrap.append(row,remove);list.appendChild(wrap);
   });
 }
 
@@ -1087,16 +1108,28 @@ async function renameVmChat(){
   }catch(e){alert(e.message)}
 }
 
-async function deleteVmChat(){
-  if(!currentVmChat)return alert("Open a VM chat first.");
-  const ok=await askConfirm("Delete VM chat?",'Delete "'+(currentVmChat.title||"VM Chat")+'" and its messages?',{confirmLabel:"Delete",danger:true});
+async function deleteVmChatById(id){
+  const chat=vmChats.find(x=>x.id===id);
+  if(!chat)return;
+  const ok=await askConfirm("Delete VM chat?",'Delete "'+(chat.title||"VM Chat")+'" and its messages?',{confirmLabel:"Delete",danger:true});
   if(!ok)return;
   try{
-    await api("/vm-agent/chats/"+encodeURIComponent(currentVmChat.id),{method:"DELETE"});
-    currentVmChat=null;vmAgentMessages=[];
-    await loadVmChats(false);renderVmAgentConversation();
-    const first=vmVisibleChats()[0];if(first)await openVmChat(first.id);
+    await api("/vm-agent/chats/"+encodeURIComponent(id),{method:"DELETE"});
+    const wasCurrent=currentVmChat?.id===id;
+    if(wasCurrent){currentVmChat=null;vmAgentMessages=[];}
+    await loadVmChats(false);
+    if(wasCurrent){
+      renderVmAgentConversation();
+      const first=vmVisibleChats()[0];if(first)await openVmChat(first.id);
+    }else{
+      renderVmChatSelect();
+    }
   }catch(e){alert(e.message)}
+}
+
+async function deleteVmChat(){
+  if(!currentVmChat)return alert("Open a VM chat first.");
+  await deleteVmChatById(currentVmChat.id);
 }
 
 function renderVmAgentConversation(){
