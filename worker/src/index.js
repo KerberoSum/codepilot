@@ -549,6 +549,9 @@ export default {
       }
 
       if (path === "/vm-desktop/frame" && request.method === "GET") {
+        if (!(await requestIsAuthenticated())) {
+          return json({ success: false, error: "Authentication required." }, 401);
+        }
         if (!env.VM_AGENT_SECRET) {
           return json({ success: false, error: "VM Agent secret is not configured." }, 503);
         }
@@ -572,6 +575,9 @@ export default {
       }
 
       if (path === "/vm-desktop/input" && request.method === "POST") {
+        if (!(await requestIsAuthenticated())) {
+          return json({ success: false, error: "Authentication required." }, 401);
+        }
         const body = await safeJSON(request);
         if (!body || typeof body !== "object") {
           return json({ success: false, error: "Invalid desktop input payload." }, 400);
