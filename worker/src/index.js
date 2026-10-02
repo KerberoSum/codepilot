@@ -559,7 +559,7 @@ export default {
         if (!vmBase) {
           return json({ success: false, error: "VM Agent URL is not configured or registered." }, 503);
         }
-        const upstream = await fetch(vmBase + "/desktop/frame", {
+        const upstream = await fetch(vmBase + "/desktop/frame" + url.search, {
           method: "GET",
           headers: { "Authorization": "Bearer " + String(env.VM_AGENT_SECRET).trim() },
           signal: AbortSignal.timeout(15000)
