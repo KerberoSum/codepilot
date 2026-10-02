@@ -14,9 +14,15 @@ install -m 0644 "$SCRIPT_DIR/agent_server.py" "$AGENT_DIR/agent_server.py"
 install -m 0644 "$SCRIPT_DIR/chatgpt_desktop_bridge.py" "$AGENT_DIR/chatgpt_desktop_bridge.py"
 install -m 0644 "$SCRIPT_DIR/desktop_relay.py" /usr/local/lib/codepilot-desktop-relay.py
 install -m 0755 -o ubuntu -g ubuntu "$SCRIPT_DIR/chatgpt-vm-launcher.sh" /home/ubuntu/bin/chatgpt-vm
+if [ -f "$SCRIPT_DIR/codepilot-watchdog.sh" ]; then
+  install -m 0755 "$SCRIPT_DIR/codepilot-watchdog.sh" /usr/local/sbin/codepilot-watchdog
+fi
 
 if systemctl list-unit-files codepilot-desktop-relay.service --no-legend 2>/dev/null | grep -q '^codepilot-desktop-relay.service'; then
   systemctl restart codepilot-desktop-relay.service
+fi
+if systemctl list-unit-files codepilot-watchdog.timer --no-legend 2>/dev/null | grep -q '^codepilot-watchdog.timer'; then
+  systemctl restart codepilot-watchdog.timer
 fi
 
 # Ubuntu 24.04 may block Bubblewrap user namespaces through AppArmor.
