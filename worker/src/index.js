@@ -790,6 +790,7 @@ export default {
         const mode = String(body?.mode || "read");
         const provider = ["chatgpt_desktop","chatgpt","openrouter","gemini","codex","grok","cursor"].includes(String(body?.provider || "")) ? String(body.provider) : "openrouter";
         const web = body?.web === true;
+        const fallback = body?.fallback !== false;
         const chatId = String(body?.chatId || "").trim().slice(0, 128);
         if (!prompt) return json({ success: false, error: "Task prompt is required." }, 400);
         if (mode !== "read" && mode !== "workspace") {
@@ -806,7 +807,7 @@ export default {
           let vmResponse = await fetch(vmBase + "/agent/task/stream", {
             method: "POST",
             headers: commonHeaders,
-            body: JSON.stringify({ prompt, context_prompt: contextPrompt || null, mode, provider, web, chat_id: chatId || null }),
+            body: JSON.stringify({ prompt, context_prompt: contextPrompt || null, mode, provider, web, allow_fallback: fallback, chat_id: chatId || null }),
             signal: AbortSignal.timeout(300000)
           });
 
@@ -814,7 +815,7 @@ export default {
             vmResponse = await fetch(vmBase + "/agent/task", {
               method: "POST",
               headers: commonHeaders,
-              body: JSON.stringify({ prompt, context_prompt: contextPrompt || null, mode, provider, web, chat_id: chatId || null }),
+              body: JSON.stringify({ prompt, context_prompt: contextPrompt || null, mode, provider, web, allow_fallback: fallback, chat_id: chatId || null }),
               signal: AbortSignal.timeout(300000)
             });
           }
@@ -894,6 +895,9 @@ export default {
         const web =
           body?.web === true;
 
+        const fallback =
+          body?.fallback !== false;
+
         const chatId =
           String(body?.chatId || "").trim().slice(0, 128);
 
@@ -944,6 +948,7 @@ export default {
                     mode,
                     provider,
                     web,
+                    allow_fallback: fallback,
                     chat_id: chatId || null
                   }),
                 signal:
@@ -1213,6 +1218,7 @@ export default {
         const mode = String(body?.mode || "workspace");
         const provider = ["chatgpt_desktop","chatgpt","openrouter","gemini","codex","grok","cursor"].includes(String(body?.provider || "")) ? String(body.provider) : "openrouter";
         const web = body?.web === true;
+        const fallback = body?.fallback !== false;
         const title = String(body?.title || "").trim().slice(0, 120);
         if (!prompt) return json({ success: false, error: "Queued command is required." }, 400);
         if (!chatId) return json({ success: false, error: "A VM chat is required before queuing a command." }, 400);
@@ -1235,6 +1241,7 @@ export default {
               mode,
               provider,
               web,
+              allow_fallback: fallback,
               title: title || undefined
             },
             timeout: 12000
