@@ -154,6 +154,11 @@ body.auth-locked #authModal{display:grid!important;background:var(--bg)}
 .agent-chat-bubble{max-width:min(780px,88%);border:1px solid var(--border);border-radius:12px;padding:11px 12px;overflow-wrap:anywhere}.agent-chat-role{font-size:8px;font-weight:800;color:var(--muted);margin-bottom:5px;text-transform:uppercase;letter-spacing:.6px}.agent-chat-msg.user .agent-chat-role{text-align:right}
 .agent-chat-bubble>.msg-text{font-size:11px}.agent-chat-error{border-color:rgba(255,102,125,.45)!important;background:rgba(255,102,125,.07)!important}.agent-chat-pending{color:var(--muted)}
 .agent-run-meta{max-width:900px;margin:7px auto 0}
+.vm-timeline{max-width:900px;margin:0 auto 12px;border:1px solid var(--border);border-radius:10px;background:var(--panel);overflow:hidden}
+.vm-timeline-toggle{width:100%;display:flex;align-items:center;gap:7px;border:0;background:transparent;color:var(--muted);padding:7px 9px;text-align:left;font-size:9px;font-weight:700}.vm-timeline-toggle:hover{background:var(--panel2);color:#fff}.vm-timeline-toggle strong{color:inherit}.vm-timeline-count{min-width:20px;padding:1px 5px;border:1px solid var(--border);border-radius:999px;text-align:center;font-size:7px;color:#dbe5f2;background:var(--panel3)}.vm-timeline-arrow{margin-left:auto;font-size:8px}
+.vm-timeline-body{max-height:230px;overflow:auto;border-top:1px solid var(--border2);padding:4px 8px 7px}.vm-timeline-empty{padding:9px 2px;color:var(--muted2);font-size:8px}
+.vm-timeline-item{display:grid;grid-template-columns:10px minmax(0,1fr) auto;gap:7px;align-items:start;padding:7px 2px;border-bottom:1px solid var(--border2)}.vm-timeline-item:last-child{border-bottom:0}.vm-timeline-dot{width:7px;height:7px;margin-top:4px;border-radius:50%;background:var(--muted2)}.vm-timeline-item.complete .vm-timeline-dot{background:var(--green)}.vm-timeline-item.error .vm-timeline-dot{background:var(--red)}.vm-timeline-item.queue .vm-timeline-dot{background:var(--yellow)}.vm-timeline-item.run .vm-timeline-dot{background:var(--accent)}
+.vm-timeline-main{min-width:0}.vm-timeline-title{font-size:8px;font-weight:700;color:#e7edf5}.vm-timeline-detail{margin-top:2px;color:var(--muted);font-size:7px;line-height:1.4;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.vm-timeline-meta{margin-top:3px;color:var(--muted2);font-size:7px;line-height:1.35}.vm-timeline-time{font-size:7px;color:var(--muted2);white-space:nowrap;padding-top:1px}
 .agent-composer{flex:0 0 auto;border-top:1px solid var(--border);background:var(--panel);padding:12px clamp(12px,3vw,34px)}
 .agent-composer-inner{max-width:900px;margin:0 auto;border:1px solid var(--border);border-radius:12px;background:var(--panel2);overflow:hidden}
 .agent-composer textarea{width:100%;min-height:88px;max-height:220px;resize:vertical;border:0;outline:0;background:transparent;color:#fff;padding:12px;font:inherit;line-height:1.55}
@@ -558,6 +563,12 @@ body.auth-locked #authModal{display:grid!important;background:var(--bg)}
 
       <div class="agent-transcript">
         <div class="agent-welcome"><strong>Your VM is your CodePilot workspace.</strong>Choose a project or Random Chats, choose a brain, then chat normally. Read only inspects; Edit files can change files inside <code>/srv/codepilot-workspace</code>.</div>
+        <div id="vmTimeline" class="vm-timeline">
+          <button id="vmTimelineToggle" class="vm-timeline-toggle" type="button" onclick="toggleVmTimeline()" aria-expanded="false">
+            <strong>Activity</strong><span id="vmTimelineCount" class="vm-timeline-count">0</span><span id="vmTimelineArrow" class="vm-timeline-arrow">▾</span>
+          </button>
+          <div id="vmTimelineBody" class="vm-timeline-body hidden"><div class="vm-timeline-empty">Open a VM chat to see its activity.</div></div>
+        </div>
         <div id="vmAgentConversation" class="agent-chat"></div>
         <div id="vmAgentMeta" class="vm-agent-meta agent-run-meta"></div>
       </div>
@@ -745,7 +756,8 @@ let storageSnapshot=null;
 let vmMissionTimer=null;
 let vmStatusTimer=null;
 let vmActivePage="agent";
-let vmChats=[], currentVmChat=null, vmAgentMessages=[], vmRemoteBusy=false, vmProjectId="";
+let vmChats=[], currentVmChat=null, vmAgentMessages=[], vmAgentEvents=[], vmRemoteBusy=false, vmProjectId="";
+let vmTimelineOpen=false;
 let vmCapabilitiesCache=null;
 let terminalCwd="/srv/codepilot-workspace", terminalHistory=[], terminalHistoryIndex=0;
 let remoteScreenTimer=null, remoteScreenBusy=false, remoteScreenObjectUrl="", remotePointerActive=false, remoteMoveTimer=null, remotePendingMove=null;
@@ -1478,8 +1490,8 @@ function renderVmProjectSelect(){
 async function vmProjectChanged(){
   const id=document.getElementById("vmProjectSelect")?.value||"";
   vmProjectId=vmProjectIsKnown(id)?id:"";
-  currentVmChat=null;vmAgentMessages=[];
-  renderVmProjectSelect();renderVmChatSelect();renderVmAgentConversation();
+  currentVmChat=null;vmAgentMessages=[];vmAgentEvents=[];
+  renderVmProjectSelect();renderVmChatSelect();renderVmAgentConversation();renderVmTimeline();
   const first=vmVisibleChats()[0];if(first)await openVmChat(first.id);
   else document.getElementById("vmAgentTask")?.focus();
 }
@@ -1508,9 +1520,9 @@ async function deleteVmProject(){
   const ok=await askConfirm("Delete project?",'Delete "'+(project.name||"Project")+'"? Its VM chats will move to Random Chats.',{confirmLabel:"Delete",danger:true});if(!ok)return;
   try{
     await api("/projects/"+encodeURIComponent(project.id),{method:"DELETE"});
-    vmProjectId="";currentVmChat=null;vmAgentMessages=[];
+    vmProjectId="";currentVmChat=null;vmAgentMessages=[];vmAgentEvents=[];
     await Promise.all([loadProjects(),loadVmChats(false)]);
-    renderVmProjectSelect();renderVmChatSelect();renderVmAgentConversation();
+    renderVmProjectSelect();renderVmChatSelect();renderVmAgentConversation();renderVmTimeline();
   }catch(e){alert(e.message)}
 }
 
@@ -1739,6 +1751,7 @@ async function openVmChat(id){
       if(i>=0)vmChats[i]={...vmChats[i],...currentVmChat};
     }
     renderVmChatSelect();renderVmAgentConversation();
+    loadVmTimeline(id).catch(()=>{});
     refreshVmTaskStatus().catch(()=>{});
   }catch(e){
     document.getElementById("vmAgentMeta").textContent="Could not open VM chat · "+(e.message||e);
@@ -1746,8 +1759,8 @@ async function openVmChat(id){
 }
 
 function newVmChat(){
-  currentVmChat=null;vmAgentMessages=[];
-  renderVmChatSelect();renderVmAgentConversation();
+  currentVmChat=null;vmAgentMessages=[];vmAgentEvents=[];
+  renderVmChatSelect();renderVmAgentConversation();renderVmTimeline();
   const input=document.getElementById("vmAgentTask");if(input)input.value="";
   const mode=document.getElementById("vmAgentMode");if(mode)mode.value="workspace";
   const web=document.getElementById("vmAgentWeb");if(web)web.checked=true;
@@ -1800,10 +1813,10 @@ async function deleteVmChatById(id){
   try{
     await api("/vm-agent/chats/"+encodeURIComponent(id),{method:"DELETE"});
     const wasCurrent=currentVmChat?.id===id;
-    if(wasCurrent){currentVmChat=null;vmAgentMessages=[];}
+    if(wasCurrent){currentVmChat=null;vmAgentMessages=[];vmAgentEvents=[];}
     await loadVmChats(false);
     if(wasCurrent){
-      renderVmAgentConversation();
+      renderVmAgentConversation();renderVmTimeline();
       const first=vmVisibleChats()[0];if(first)await openVmChat(first.id);
     }else{
       renderVmChatSelect();
@@ -1814,6 +1827,74 @@ async function deleteVmChatById(id){
 async function deleteVmChat(){
   if(!currentVmChat)return alert("Open a VM chat first.");
   await deleteVmChatById(currentVmChat.id);
+}
+
+function toggleVmTimeline(force){
+  vmTimelineOpen=typeof force==="boolean"?force:!vmTimelineOpen;
+  renderVmTimeline();
+  if(vmTimelineOpen&&currentVmChat)loadVmTimeline(currentVmChat.id).catch(()=>{});
+}
+
+function vmTimelineMetaText(event){
+  const m=event?.metadata&&typeof event.metadata==="object"?event.metadata:{};
+  const bits=[];
+  if(m.actual_provider)bits.push(vmBrainLabel(m.actual_provider));
+  else if(m.requested_provider)bits.push(vmBrainLabel(m.requested_provider));
+  if(m.fallback_used)bits.push("safe fallback");
+  if(m.duration_seconds!=null&&Number.isFinite(Number(m.duration_seconds)))bits.push(formatVmTaskElapsed(Number(m.duration_seconds)));
+  if(m.total_tokens!=null&&Number.isFinite(Number(m.total_tokens)))bits.push(formatTokens(Number(m.total_tokens))+" tokens");
+  if(m.cost_usd!=null&&Number.isFinite(Number(m.cost_usd)))bits.push(formatVmCost(Number(m.cost_usd)));
+  if(m.mode)bits.push(m.mode==="workspace"?"edit files":"read only");
+  if(m.web===true)bits.push("web");
+  return bits.join(" · ");
+}
+
+function renderVmTimeline(){
+  const body=document.getElementById("vmTimelineBody"),count=document.getElementById("vmTimelineCount"),toggle=document.getElementById("vmTimelineToggle"),arrow=document.getElementById("vmTimelineArrow");
+  if(count)count.textContent=String(vmAgentEvents.length);
+  if(toggle)toggle.setAttribute("aria-expanded",vmTimelineOpen?"true":"false");
+  if(arrow)arrow.textContent=vmTimelineOpen?"▴":"▾";
+  if(!body)return;
+  body.classList.toggle("hidden",!vmTimelineOpen);
+  if(!vmTimelineOpen)return;
+  body.innerHTML="";
+  if(!currentVmChat){
+    const empty=document.createElement("div");empty.className="vm-timeline-empty";empty.textContent="Open a VM chat to see its activity.";body.appendChild(empty);return;
+  }
+  if(!vmAgentEvents.length){
+    const empty=document.createElement("div");empty.className="vm-timeline-empty";empty.textContent="No activity recorded for this chat yet.";body.appendChild(empty);return;
+  }
+  vmAgentEvents.forEach(event=>{
+    const kind=["complete","error","queue","run","chat"].includes(event.event_type)?event.event_type:"activity";
+    const row=document.createElement("div");row.className="vm-timeline-item "+kind;
+    const dot=document.createElement("span");dot.className="vm-timeline-dot";
+    const main=document.createElement("div");main.className="vm-timeline-main";
+    const title=document.createElement("div");title.className="vm-timeline-title";title.textContent=event.title||"Activity";
+    main.appendChild(title);
+    if(event.detail){
+      const detail=document.createElement("div");detail.className="vm-timeline-detail";detail.textContent=event.detail;detail.title=event.detail;main.appendChild(detail);
+    }
+    const metaText=vmTimelineMetaText(event);
+    if(metaText){
+      const meta=document.createElement("div");meta.className="vm-timeline-meta";meta.textContent=metaText;main.appendChild(meta);
+    }
+    const time=document.createElement("div");time.className="vm-timeline-time";
+    try{
+      const date=new Date(Number(event.created_at||0));
+      time.textContent=date.toLocaleTimeString([], {hour:"2-digit",minute:"2-digit",second:"2-digit"});
+      time.title=date.toLocaleString();
+    }catch{time.textContent="";}
+    row.append(dot,main,time);body.appendChild(row);
+  });
+}
+
+async function loadVmTimeline(chatId=currentVmChat?.id||""){
+  if(!chatId){vmAgentEvents=[];renderVmTimeline();return []}
+  const d=await api("/vm-agent/chats/"+encodeURIComponent(chatId)+"/events?limit=80",{signal:AbortSignal.timeout(12000)});
+  if(currentVmChat?.id!==chatId)return [];
+  vmAgentEvents=Array.isArray(d.events)?d.events:[];
+  renderVmTimeline();
+  return vmAgentEvents;
 }
 
 function renderVmAgentConversation(){
@@ -2062,6 +2143,7 @@ async function runVmAgentTask(){
       inference:finalData.inference||{},model:finalData.inference?.requestedModel||""
     });
     addVmAgentHistory({at:new Date().toISOString(),prompt,mode,web,result,tokens:t.total??null,duration:elapsed,cost:finalData.cost_usd??null});
+    if(currentVmChat)loadVmTimeline(currentVmChat.id).catch(()=>{});
   }catch(e){
     pending?.remove();
     removeRecoveredVmPending();
@@ -2080,6 +2162,7 @@ async function runVmAgentTask(){
     }
     meta.textContent="Status: failed";
     addVmAgentHistory({at:new Date().toISOString(),prompt,mode,web,error:message});
+    if(currentVmChat)loadVmTimeline(currentVmChat.id).catch(()=>{});
     checkVmAgent(false);
   }finally{
     button.disabled=false;
@@ -2358,6 +2441,8 @@ async function loadVmMissions(){
   renderVmQueueState(items);
   if(Array.isArray(d.synced_chat_ids)&&d.synced_chat_ids.includes(id)){
     await openVmChat(id);
+  }else if(currentVmChat?.id===id){
+    loadVmTimeline(id).catch(()=>{});
   }
   return items;
 }

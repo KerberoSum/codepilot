@@ -264,6 +264,97 @@ export default {
           CREATE INDEX IF NOT EXISTS idx_vm_agent_messages_chat_created
           ON vm_agent_messages(chat_id, created_at)
         `).run();
+        await env.DB.prepare(`
+          CREATE TABLE IF NOT EXISTS vm_agent_events (
+            id TEXT PRIMARY KEY,
+            chat_id TEXT NOT NULL,
+            event_type TEXT NOT NULL,
+            title TEXT NOT NULL,
+            detail TEXT NOT NULL DEFAULT '',
+            metadata_json TEXT NOT NULL DEFAULT '{}',
+            created_at INTEGER NOT NULL,
+            FOREIGN KEY (chat_id) REFERENCES vm_agent_chats(id) ON DELETE CASCADE
+          )
+        `).run();
+        await env.DB.prepare(`
+          CREATE INDEX IF NOT EXISTS idx_vm_agent_events_chat_created
+          ON vm_agent_events(chat_id, created_at DESC)
+        `).run();
+      }
+
+      async function recordVmEvent(chatId, eventType, title, detail = "", metadata = {}, eventId = "") {
+        const cleanChatId = String(chatId || "").trim();
+        if (!cleanChatId) return null;
+        await ensureVmChatTables();
+        const exists = await env.DB.prepare(
+          "SELECT id FROM vm_agent_chats WHERE id = ? LIMIT 1"
+        ).bind(cleanChatId).first();
+        if (!exists) return null;
+        const event = {
+          id: String(eventId || "").trim().slice(0, 180) || crypto.randomUUID(),
+          chat_id: cleanChatId,
+          event_type: String(eventType || "activity").slice(0, 48),
+          title: String(title || "Activity").slice(0, 180),
+          detail: String(detail || "").slice(0, 4000),
+          metadata_json: JSON.stringify(metadata && typeof metadata === "object" ? metadata : {}),
+          created_at: Date.now()
+        };
+        await env.DB.prepare(`
+          INSERT OR IGNORE INTO vm_agent_events
+          (id, chat_id, event_type, title, detail, metadata_json, created_at)
+          VALUES (?, ?, ?, ?, ?, ?, ?)
+        `).bind(
+          event.id, event.chat_id, event.event_type, event.title,
+          event.detail, event.metadata_json, event.created_at
+        ).run();
+        return event;
+      }
+
+      function vmRunEventMetadata(runId, provider, mode, web, data = {}, status = "") {
+        const fallback = data?.fallback && typeof data.fallback === "object" ? data.fallback : {};
+        const tokens = data?.tokens && typeof data.tokens === "object" ? data.tokens : {};
+        return {
+          run_id: runId,
+          requested_provider: String(fallback.requested_provider || provider || "openrouter"),
+          actual_provider: String(fallback.actual_provider || provider || "openrouter"),
+          fallback_used: fallback.used === true,
+          fallback_attempts: Array.isArray(fallback.attempts) ? fallback.attempts.slice(0, 8) : [],
+          duration_seconds: data?.duration_seconds != null && Number.isFinite(Number(data.duration_seconds)) ? Number(data.duration_seconds) : null,
+          total_tokens: tokens?.total != null && Number.isFinite(Number(tokens.total)) ? Number(tokens.total) : null,
+          cost_usd: data?.cost_usd != null && Number.isFinite(Number(data.cost_usd)) ? Number(data.cost_usd) : null,
+          mode: mode === "workspace" ? "workspace" : "read",
+          web: web === true,
+          status: String(status || data?.status || "")
+        };
+      }
+
+      async function recordVmRunStart(chatId, runId, prompt, provider, mode, web) {
+        if (!chatId) return null;
+        return await recordVmEvent(
+          chatId,
+          "run",
+          "Run started",
+          String(prompt || "").slice(0, 700),
+          vmRunEventMetadata(runId, provider, mode, web, {}, "running"),
+          "run:" + runId + ":started"
+        );
+      }
+
+      async function recordVmRunTerminal(chatId, runId, provider, mode, web, data = {}, fallbackError = "") {
+        if (!chatId) return null;
+        const failed = data?.ok === false || data?.status === "failed" || Boolean(data?.error) || Boolean(fallbackError);
+        const metadata = vmRunEventMetadata(runId, provider, mode, web, data, failed ? "failed" : "completed");
+        const detail = failed
+          ? String(data?.error || fallbackError || "Remote Worker task failed.").slice(0, 1400)
+          : ("Handled by " + metadata.actual_provider + (metadata.fallback_used ? " after safe fallback." : "."));
+        return await recordVmEvent(
+          chatId,
+          failed ? "error" : "complete",
+          failed ? "Run failed" : "Run completed",
+          detail,
+          metadata,
+          "run:" + runId + ":" + (failed ? "failed" : "completed")
+        );
       }
 
       function vmQueueTimestamp(value, fallback = Date.now()) {
@@ -302,6 +393,14 @@ export default {
           web
         ).run();
         if (Number(userInsert?.meta?.changes || 0) > 0) changed = true;
+        await recordVmEvent(
+          chatId,
+          "queue",
+          "Queued command added",
+          String(mission?.title || mission?.prompt || "Queued command").slice(0, 500),
+          { queue_id: queueId, provider, mode, web: !!web, status: String(mission?.status || "queued") },
+          "queue:" + queueId + ":queued"
+        );
 
         const terminal = ["completed","failed","cancelled","interrupted"].includes(String(mission?.status || ""));
         if (terminal) {
@@ -334,6 +433,33 @@ export default {
             error
           ).run();
           if (Number(assistantInsert?.meta?.changes || 0) > 0) changed = true;
+          const fallback = mission?.fallback && typeof mission.fallback === "object" ? mission.fallback : {};
+          const actualProvider = String(fallback.actual_provider || provider);
+          const eventTitle = mission.status === "completed"
+            ? "Queued command completed"
+            : mission.status === "cancelled"
+              ? "Queued command cancelled"
+              : mission.status === "interrupted"
+                ? "Queued command interrupted"
+                : "Queued command failed";
+          await recordVmEvent(
+            chatId,
+            mission.status === "completed" ? "complete" : "error",
+            eventTitle,
+            mission.status === "completed"
+              ? ("Handled by " + actualProvider + (fallback.used ? " after safe fallback." : "."))
+              : String(mission?.error || content).slice(0, 1200),
+            {
+              queue_id: queueId,
+              requested_provider: provider,
+              actual_provider: actualProvider,
+              fallback_used: fallback.used === true,
+              duration_seconds: mission?.duration_seconds ?? null,
+              cost_usd: mission?.cost_usd ?? null,
+              status: mission.status
+            },
+            "queue:" + queueId + ":" + String(mission.status)
+          );
         }
 
         if (changed) {
@@ -924,6 +1050,8 @@ export default {
         }
         const vmBase = await getVmAgentBase();
         if (!vmBase) return json({ success: false, error: "VM Agent URL is not configured or registered." }, 503);
+        const runId = crypto.randomUUID();
+        await recordVmRunStart(chatId, runId, prompt, provider, mode, web);
 
         const commonHeaders = {
           "Authorization": "Bearer " + String(env.VM_AGENT_SECRET).trim(),
@@ -950,15 +1078,83 @@ export default {
             const text = await vmResponse.text();
             let data = {};
             try { data = text ? JSON.parse(text) : {}; } catch {}
+            const failure = String(
+              (typeof data.detail === "string" ? data.detail : data.detail?.message) ||
+              data.error ||
+              ("VM Agent HTTP " + vmResponse.status)
+            );
+            await recordVmRunTerminal(chatId, runId, provider, mode, web, { ok: false, error: failure, status: "failed" });
             return json({
               success: false,
-              error: data.detail || data.error || ("VM Agent HTTP " + vmResponse.status)
+              error: failure
             }, 502);
           }
 
           const contentType = vmResponse.headers.get("content-type") || "";
-          if (contentType.includes("text/event-stream")) {
-            return new Response(vmResponse.body, {
+          if (contentType.includes("text/event-stream") && vmResponse.body) {
+            const upstreamReader = vmResponse.body.getReader();
+            const auditDecoder = new TextDecoder();
+            let auditBuffer = "";
+            let terminalData = null;
+            let terminalRecorded = false;
+
+            function observeSseForAudit(text) {
+              auditBuffer += String(text || "");
+              let index;
+              while ((index = auditBuffer.indexOf("\n\n")) >= 0) {
+                const block = auditBuffer.slice(0, index);
+                auditBuffer = auditBuffer.slice(index + 2);
+                let eventName = "message";
+                let dataText = "";
+                for (const line of block.split("\n")) {
+                  if (line.startsWith("event:")) eventName = line.slice(6).trim();
+                  else if (line.startsWith("data:")) dataText += (dataText ? "\n" : "") + line.slice(5).trim();
+                }
+                if (eventName === "result" && dataText) {
+                  try { terminalData = JSON.parse(dataText); } catch {}
+                }
+              }
+            }
+
+            async function finishAudit(fallbackError = "") {
+              if (terminalRecorded) return;
+              terminalRecorded = true;
+              const data = terminalData || (fallbackError
+                ? { ok: false, error: fallbackError, status: "failed" }
+                : { ok: false, error: "Stream ended before a result event.", status: "failed" });
+              try {
+                await recordVmRunTerminal(chatId, runId, provider, mode, web, data, fallbackError);
+              } catch {}
+            }
+
+            const auditedStream = new ReadableStream({
+              async pull(controller) {
+                try {
+                  const { value, done } = await upstreamReader.read();
+                  if (done) {
+                    const tail = auditDecoder.decode();
+                    if (tail) observeSseForAudit(tail);
+                    if (auditBuffer.trim()) observeSseForAudit("\n\n");
+                    await finishAudit();
+                    controller.close();
+                    return;
+                  }
+                  if (value) {
+                    controller.enqueue(value);
+                    observeSseForAudit(auditDecoder.decode(value, { stream: true }));
+                  }
+                } catch (error) {
+                  await finishAudit(error?.message || "Streaming request failed.");
+                  controller.error(error);
+                }
+              },
+              async cancel(reason) {
+                try { await upstreamReader.cancel(reason); } catch {}
+                await finishAudit("Streaming request was cancelled before completion.");
+              }
+            });
+
+            return new Response(auditedStream, {
               status: 200,
               headers: {
                 ...corsHeaders,
@@ -970,6 +1166,7 @@ export default {
           }
 
           const data = await vmResponse.json();
+          await recordVmRunTerminal(chatId, runId, provider, mode, web, data);
           const encoder = new TextEncoder();
           const payload =
             "event: status\ndata: " + JSON.stringify({ stage: "completed" }) + "\n\n" +
@@ -983,9 +1180,11 @@ export default {
             }
           });
         } catch (error) {
+          const failure = "VM Agent stream request failed: " + (error?.message || String(error));
+          await recordVmRunTerminal(chatId, runId, provider, mode, web, { ok: false, error: failure, status: "failed" });
           return json({
             success: false,
-            error: "VM Agent stream request failed: " + (error?.message || String(error))
+            error: failure
           }, 502);
         }
       }
@@ -1054,6 +1253,9 @@ export default {
           }, 503);
         }
 
+        const runId = crypto.randomUUID();
+        await recordVmRunStart(chatId, runId, prompt, provider, mode, web);
+
         try {
           const vmResponse =
             await fetch(
@@ -1092,10 +1294,11 @@ export default {
                 ? JSON.parse(vmText)
                 : {};
           } catch {
+            const failure = "VM Agent returned invalid JSON.";
+            await recordVmRunTerminal(chatId, runId, provider, mode, web, { ok: false, error: failure, status: "failed" });
             return json({
               success: false,
-              error:
-                "VM Agent returned invalid JSON."
+              error: failure
             }, 502);
           }
 
@@ -1104,27 +1307,33 @@ export default {
               typeof vmData.detail === "string"
                 ? vmData.detail
                 : vmData.detail?.message;
+            const failure = String(
+              detail ||
+              vmData.error ||
+              ("VM Agent HTTP " + vmResponse.status)
+            );
+            await recordVmRunTerminal(chatId, runId, provider, mode, web, { ok: false, error: failure, status: "failed" });
 
             return json({
               success: false,
-              error:
-                detail ||
-                vmData.error ||
-                ("VM Agent HTTP " + vmResponse.status)
+              error: failure
             }, 502);
           }
 
+          await recordVmRunTerminal(chatId, runId, provider, mode, web, vmData);
           return json({
             success: true,
             ...vmData
           });
 
         } catch (error) {
+          const failure =
+            "VM Agent request failed: " +
+            (error?.message || String(error));
+          await recordVmRunTerminal(chatId, runId, provider, mode, web, { ok: false, error: failure, status: "failed" });
           return json({
             success: false,
-            error:
-              "VM Agent request failed: " +
-              (error?.message || String(error))
+            error: failure
           }, 502);
         }
 
@@ -1166,6 +1375,7 @@ export default {
             INSERT INTO vm_agent_chats (id, title, created_at, updated_at, mode, web, provider, last_read_at, project_id)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
           `).bind(id, title, now, now, mode, web, provider, now, projectId).run();
+          await recordVmEvent(id, "chat", "Chat created", title, { provider, mode, web: !!web, project_id: projectId }, "chat:" + id + ":created");
           return json({ success: true, chat: { id, title, created_at: now, updated_at: now, mode, web, provider, last_read_at: now, project_id: projectId } });
         } catch (error) {
           return json({ success: false, error: "Could not create VM Agent chat: " + (error?.message || String(error)) }, 500);
@@ -1214,11 +1424,46 @@ export default {
 
         if (request.method === "DELETE") {
           await env.DB.batch([
+            env.DB.prepare("DELETE FROM vm_agent_events WHERE chat_id = ?").bind(chatId),
             env.DB.prepare("DELETE FROM vm_agent_messages WHERE chat_id = ?").bind(chatId),
             env.DB.prepare("DELETE FROM vm_agent_chats WHERE id = ?").bind(chatId)
           ]);
           return json({ success: true });
         }
+      }
+
+      const vmChatEventsMatch = path.match(/^\/vm-agent\/chats\/([^/]+)\/events$/);
+      if (vmChatEventsMatch && request.method === "GET") {
+        const chatId = decodeURIComponent(vmChatEventsMatch[1]);
+        await ensureVmChatTables();
+        const exists = await env.DB.prepare(
+          "SELECT id FROM vm_agent_chats WHERE id = ? LIMIT 1"
+        ).bind(chatId).first();
+        if (!exists) return json({ success: false, error: "VM Agent chat not found." }, 404);
+
+        const requestedLimit = Number(url.searchParams.get("limit") || 80);
+        const limit = Math.max(1, Math.min(200, Number.isFinite(requestedLimit) ? Math.trunc(requestedLimit) : 80));
+        const result = await env.DB.prepare(`
+          SELECT id, event_type, title, detail, metadata_json, created_at
+          FROM vm_agent_events
+          WHERE chat_id = ?
+          ORDER BY created_at DESC
+          LIMIT ?
+        `).bind(chatId, limit).all();
+
+        const events = (result.results || []).map(row => {
+          let metadata = {};
+          try { metadata = row.metadata_json ? JSON.parse(row.metadata_json) : {}; } catch {}
+          return {
+            id: row.id,
+            event_type: row.event_type,
+            title: row.title,
+            detail: row.detail,
+            metadata,
+            created_at: row.created_at
+          };
+        });
+        return json({ success: true, events });
       }
 
       const vmChatMessagesMatch = path.match(/^\/vm-agent\/chats\/([^/]+)\/messages$/);
