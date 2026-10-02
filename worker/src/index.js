@@ -1172,6 +1172,22 @@ export default {
         }
       }
 
+      const providerTestMatch = path.match(/^\/vm-agent\/providers\/([^/]+)\/test$/);
+      if (providerTestMatch && request.method === "POST") {
+        const provider = decodeURIComponent(providerTestMatch[1] || "");
+        const allowed = new Set(["chatgpt_desktop","chatgpt","openrouter","gemini","codex","grok","cursor"]);
+        if (!allowed.has(provider)) return json({ success: false, error: "Unknown provider." }, 400);
+        try {
+          const data = await callVmAgentJson("/agent/providers/" + encodeURIComponent(provider) + "/test", {
+            method: "POST",
+            timeout: 12000
+          });
+          return json({ success: true, ...data });
+        } catch (error) {
+          return json({ success: false, error: error?.message || String(error) }, 502);
+        }
+      }
+
       if (path === "/vm-agent/missions" && request.method === "GET") {
         try {
           const data = await callVmAgentJson("/agent/missions", { timeout: 12000 });
