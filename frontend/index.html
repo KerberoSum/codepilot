@@ -622,6 +622,7 @@ body.auth-locked #authModal{display:grid!important;background:var(--bg)}
       onpointermove="remotePointerMove(event)"
       onpointerup="remotePointerUp(event)"
       onpointercancel="remotePointerUp(event)"
+      ondblclick="remoteDoubleClick(event)"
       oncontextmenu="event.preventDefault()"
       onwheel="remoteWheel(event)">
       <div id="remoteScreenPlaceholder" class="remote-placeholder">Loading VM desktop…</div>
@@ -1028,6 +1029,15 @@ function remotePointerUp(e){
   clearTimeout(remoteMoveTimer);remoteMoveTimer=null;
   try{e.currentTarget.releasePointerCapture(e.pointerId)}catch{}
   if(p)sendRemoteInput({type:"mouse_up",...p,button:remoteButton(e)});
+}
+
+function remoteDoubleClick(e){
+  if(remoteViewOnly)return;
+  const p=remotePoint(e);if(!p)return;
+  e.preventDefault();
+  remotePointerActive=false;remotePendingMove=null;
+  clearTimeout(remoteMoveTimer);remoteMoveTimer=null;
+  sendRemoteInput({type:"double_click",...p,button:remoteButton(e)});
 }
 
 function remoteWheel(e){
