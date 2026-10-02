@@ -564,7 +564,7 @@ export default {
           headers: { "Authorization": "Bearer " + String(env.VM_AGENT_SECRET).trim() },
           signal: AbortSignal.timeout(15000)
         });
-        const headers = new Headers();
+        const headers = new Headers(corsHeaders);
         headers.set("Content-Type", upstream.headers.get("content-type") || "image/jpeg");
         headers.set("Cache-Control", "no-store, max-age=0");
         const width = upstream.headers.get("x-codepilot-width");
