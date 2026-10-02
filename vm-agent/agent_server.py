@@ -76,7 +76,7 @@ class TerminalRequest(BaseModel):
 
 
 class DesktopInputRequest(BaseModel):
-    type: Literal["move", "mouse_down", "mouse_up", "click", "wheel", "text", "key", "chord"]
+    type: Literal["move", "mouse_down", "mouse_up", "click", "double_click", "wheel", "text", "key", "chord"]
     x: Optional[float] = None
     y: Optional[float] = None
     button: int = Field(default=1, ge=1, le=7)
