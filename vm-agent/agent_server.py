@@ -33,6 +33,7 @@ DESKTOP_RELAY_URL = os.environ.get("CODEPILOT_DESKTOP_RELAY_URL", "http://127.0.
 WORKSPACE = Path(os.environ.get("CODEPILOT_WORKSPACE", "/srv/codepilot-workspace")).resolve()
 STATE_FILE = Path(os.environ.get("CODEPILOT_MISSION_STATE", "/srv/codepilot-agent/missions.json")).resolve()
 PROVIDER_SESSION_STATE = Path(os.environ.get("CODEPILOT_PROVIDER_SESSION_STATE", "/srv/codepilot-agent/provider-sessions.json")).resolve()
+WATCHDOG_STATUS_FILE = Path(os.environ.get("CODEPILOT_WATCHDOG_STATUS", "/var/lib/codepilot-watchdog/status.json")).resolve()
 MAX_TURNS = int(os.environ.get("CODEPILOT_MAX_TURNS", "12"))
 TASK_TIMEOUT = int(os.environ.get("CODEPILOT_TASK_TIMEOUT", "300"))
 MISSION_HISTORY = int(os.environ.get("CODEPILOT_MISSION_HISTORY", "50"))
@@ -418,6 +419,31 @@ def provider_probe(provider: str) -> dict:
         "capability": info,
         "credit_safe": True,
     }
+
+
+def watchdog_snapshot() -> dict:
+    try:
+        data = json.loads(WATCHDOG_STATUS_FILE.read_text(encoding="utf-8"))
+        if not isinstance(data, dict):
+            raise ValueError("watchdog status is not an object")
+        checked_at = str(data.get("checked_at") or "")
+        age_seconds = None
+        if checked_at:
+            try:
+                stamp = datetime.fromisoformat(checked_at.replace("Z", "+00:00"))
+                age_seconds = max(0, int((datetime.now(timezone.utc) - stamp).total_seconds()))
+            except Exception:
+                pass
+        return {
+            **data,
+            "available": True,
+            "stale": age_seconds is None or age_seconds > 150,
+            "age_seconds": age_seconds,
+        }
+    except FileNotFoundError:
+        return {"available": False, "healthy": False, "stale": True, "reason": "Watchdog is not installed yet."}
+    except Exception as exc:
+        return {"available": False, "healthy": False, "stale": True, "reason": f"Watchdog status error: {exc}"}
 
 
 def system_snapshot() -> dict:
@@ -1094,6 +1120,7 @@ async def health():
         "queued_commands": sum(1 for item in missions.values() if item.get("status") == "queued"),
         "browser": {"available": browser["available"], "controller": browser["controller"]},
         "desktop": desktop_capability(),
+        "watchdog": watchdog_snapshot(),
         "providers": provider_capabilities(),
         "system": system_snapshot(),
     }
@@ -1112,6 +1139,7 @@ async def capabilities(authorization: Optional[str] = Header(default=None)):
         "workspace": str(WORKSPACE),
         "browser": browser,
         "desktop": desktop_capability(),
+        "watchdog": watchdog_snapshot(),
         "providers": provider_capabilities(),
         "system": system_snapshot(),
         "queue": {
