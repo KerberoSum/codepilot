@@ -1164,10 +1164,17 @@ async def test_provider(provider: str, authorization: Optional[str] = Header(def
 
 
 @app.get("/desktop/frame")
-async def desktop_frame(authorization: Optional[str] = Header(default=None)):
+async def desktop_frame(
+    quality: int = 58,
+    max_width: int = 1280,
+    authorization: Optional[str] = Header(default=None),
+):
     require_auth(authorization)
+    quality = max(30, min(82, int(quality)))
+    max_width = max(480, min(1440, int(max_width)))
     try:
-        status, headers, raw = await asyncio.to_thread(desktop_relay_call, "/frame", "GET", None, 12.0)
+        path = f"/frame?quality={quality}&max_width={max_width}"
+        status, headers, raw = await asyncio.to_thread(desktop_relay_call, path, "GET", None, 12.0)
     except Exception as exc:
         raise HTTPException(status_code=503, detail=f"Desktop relay unavailable: {exc}")
     if status != 200:
