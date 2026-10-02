@@ -61,6 +61,7 @@ class TaskRequest(BaseModel):
     mode: Literal["read", "workspace"] = "read"
     provider: Literal["chatgpt_desktop", "chatgpt", "openrouter", "gemini", "codex", "grok", "cursor"] = "chatgpt"
     web: bool = False
+    allow_fallback: bool = True
     chat_id: Optional[str] = Field(default=None, max_length=128)
     context_prompt: Optional[str] = Field(default=None, max_length=16000)
 
@@ -561,6 +562,31 @@ def goose_command(full_prompt: str, provider: str = "chatgpt"):
     return command
 
 
+SAFE_FALLBACK_ORDER = ["openrouter", "cursor", "grok", "chatgpt_desktop"]
+
+
+def task_with_provider(req: TaskRequest, provider: str) -> TaskRequest:
+    payload = req.model_dump() if hasattr(req, "model_dump") else req.dict()
+    payload["provider"] = provider
+    return TaskRequest(**payload)
+
+
+def fallback_candidates(req: TaskRequest) -> list[str]:
+    if not req.allow_fallback:
+        return []
+    caps = provider_capabilities()
+    result = []
+    for provider in SAFE_FALLBACK_ORDER:
+        if provider == req.provider:
+            continue
+        if req.mode == "workspace" and provider == "chatgpt_desktop":
+            continue
+        info = caps.get(provider) or {}
+        if info.get("available"):
+            result.append(provider)
+    return result
+
+
 def provider_model_name(req: TaskRequest) -> str:
     if req.provider == "chatgpt_desktop":
         return "ChatGPT Desktop · Chat"
@@ -1004,11 +1030,58 @@ async def execute(req: TaskRequest, wait_for_slot: bool = False, mission_id: Opt
         }
         return result
 
+
+async def execute_with_fallback(req: TaskRequest, wait_for_slot: bool = False, mission_id: Optional[str] = None) -> dict:
+    providers = [req.provider] + fallback_candidates(req)
+    attempts = []
+    last_exc = None
+
+    for index, provider in enumerate(providers):
+        attempt_req = req if provider == req.provider else task_with_provider(req, provider)
+        try:
+            result = await execute(attempt_req, wait_for_slot=wait_for_slot, mission_id=mission_id)
+            result["fallback"] = {
+                "enabled": bool(req.allow_fallback),
+                "used": provider != req.provider,
+                "requested_provider": req.provider,
+                "actual_provider": provider,
+                "attempts": attempts,
+                "paid_auto_fallback": False,
+            }
+            return result
+        except HTTPException as exc:
+            last_exc = exc
+            attempts.append({
+                "provider": provider,
+                "status_code": int(exc.status_code),
+                "error": str(exc.detail)[:600],
+            })
+            if int(exc.status_code) not in {500, 502, 503}:
+                raise
+            if mission_id and missions.get(mission_id, {}).get("status") in {"cancelling", "cancelled"}:
+                raise
+            if index >= len(providers) - 1:
+                raise
+        except Exception as exc:
+            last_exc = exc
+            attempts.append({
+                "provider": provider,
+                "status_code": 500,
+                "error": str(exc)[:600],
+            })
+            if index >= len(providers) - 1:
+                raise
+
+    if isinstance(last_exc, HTTPException):
+        raise last_exc
+    raise HTTPException(status_code=502, detail=str(last_exc or "All fallback providers failed."))
+
+
 def public_mission(mission: dict) -> dict:
     allowed = {
-        "id", "title", "prompt", "mode", "provider", "web", "chat_id", "status", "created_at", "started_at",
+        "id", "title", "prompt", "mode", "provider", "web", "allow_fallback", "chat_id", "status", "created_at", "started_at",
         "completed_at", "updated_at", "result", "error", "tokens", "duration_seconds",
-        "cost_usd", "inference"
+        "cost_usd", "inference", "fallback"
     }
     return {key: mission.get(key) for key in allowed if key in mission}
 
@@ -1064,11 +1137,12 @@ async def mission_worker():
             mode=mission["mode"],
             provider=mission.get("provider", "openrouter"),
             web=bool(mission.get("web")),
+            allow_fallback=bool(mission.get("allow_fallback", True)),
             chat_id=mission.get("chat_id"),
         )
 
         try:
-            result = await execute(req, wait_for_slot=True, mission_id=mission_id)
+            result = await execute_with_fallback(req, wait_for_slot=True, mission_id=mission_id)
             if mission.get("status") == "cancelling":
                 mission["status"] = "cancelled"
                 mission["error"] = "Queued command cancelled."
@@ -1079,6 +1153,7 @@ async def mission_worker():
                 mission["duration_seconds"] = result.get("duration_seconds")
                 mission["cost_usd"] = result.get("cost_usd")
                 mission["inference"] = result.get("inference", {})
+                mission["fallback"] = result.get("fallback", {})
         except HTTPException as exc:
             if mission.get("status") == "cancelling" or str(exc.detail) == "Queued command cancelled":
                 mission["status"] = "cancelled"
@@ -1147,6 +1222,12 @@ async def capabilities(authorization: Optional[str] = Header(default=None)):
             "active": active_task,
             "queued": sum(1 for item in missions.values() if item.get("status") == "queued"),
             "running": sum(1 for item in missions.values() if item.get("status") in {"running", "cancelling"}),
+        },
+        "fallback": {
+            "supported": True,
+            "safe_order": SAFE_FALLBACK_ORDER,
+            "auto_paid": False,
+            "note": "Automatic fallback never selects Codex CLI or ChatGPT Codex unless explicitly chosen as the primary brain.",
         },
         "limits": {
             "max_turns": MAX_TURNS,
@@ -1331,7 +1412,7 @@ async def terminal(req: TerminalRequest, authorization: Optional[str] = Header(d
 @app.post("/agent/task")
 async def task(req: TaskRequest, authorization: Optional[str] = Header(default=None)):
     require_auth(authorization)
-    return await execute(req, wait_for_slot=True)
+    return await execute_with_fallback(req, wait_for_slot=True)
 
 
 @app.post("/agent/task/stream")
@@ -1344,7 +1425,7 @@ async def task_stream(req: TaskRequest, authorization: Optional[str] = Header(de
             yield "event: status\ndata: " + json.dumps({"stage": "waiting"}) + "\n\n"
         yield "event: status\ndata: " + json.dumps({"stage": req.provider + "_running"}) + "\n\n"
         try:
-            result = await execute(req, wait_for_slot=True)
+            result = await execute_with_fallback(req, wait_for_slot=True)
             yield "event: status\ndata: " + json.dumps({"stage": "completed"}) + "\n\n"
             yield "event: result\ndata: " + json.dumps(result) + "\n\n"
         except HTTPException as exc:
@@ -1368,6 +1449,7 @@ async def create_mission(req: MissionRequest, authorization: Optional[str] = Hea
         "mode": req.mode,
         "provider": req.provider,
         "web": req.web,
+        "allow_fallback": req.allow_fallback,
         "status": "queued",
         "created_at": now_iso(),
         "updated_at": now_iso(),
