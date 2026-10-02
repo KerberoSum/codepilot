@@ -6,6 +6,7 @@ import os
 import subprocess
 import tempfile
 import threading
+import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
@@ -130,7 +131,7 @@ def handle_input(data):
     root = X11.XDefaultRootWindow(d)
     width, height = display_size(d)
     try:
-        if kind in {"move", "mouse_down", "mouse_up", "click"}:
+        if kind in {"move", "mouse_down", "mouse_up", "click", "double_click"}:
             nx = max(0.0, min(1.0, float(data.get("x", 0))))
             ny = max(0.0, min(1.0, float(data.get("y", 0))))
             x = min(width - 1, max(0, round(nx * (width - 1))))
@@ -144,6 +145,13 @@ def handle_input(data):
             elif kind == "click":
                 XTST.XTestFakeButtonEvent(d, button, 1, 0)
                 XTST.XTestFakeButtonEvent(d, button, 0, 0)
+            elif kind == "double_click":
+                for index in range(2):
+                    XTST.XTestFakeButtonEvent(d, button, 1, 0)
+                    XTST.XTestFakeButtonEvent(d, button, 0, 0)
+                    X11.XFlush(d)
+                    if index == 0:
+                        time.sleep(0.08)
         elif kind == "wheel":
             delta = float(data.get("deltaY", 0))
             button = 5 if delta > 0 else 4
