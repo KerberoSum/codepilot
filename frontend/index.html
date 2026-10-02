@@ -536,6 +536,10 @@ body.auth-locked #authModal{display:grid!important;background:var(--bg)}
             <input id="vmAgentWeb" type="checkbox" checked>
             Web access
           </label>
+          <label class="agent-toggle" title="Retry safe available brains on provider failure. Never auto-selects Codex CLI or ChatGPT Codex.">
+            <input id="vmAgentFallback" type="checkbox" checked>
+            Safe fallback
+          </label>
           <button id="vmStopTaskButton" class="agent-secondary" onclick="stopVmCurrentTask()" title="Stop the currently running Remote Worker task">Stop task</button>
           <button class="agent-page-tab" onclick="checkVmAgent(true)">Check</button>
         </div>
@@ -1212,6 +1216,7 @@ function setVmAgentPreset(prompt,mode="read",web=false){
 }
 
 function vmAgentWebEnabled(){return document.getElementById("vmAgentWeb")?.checked===true;}
+function vmAgentFallbackEnabled(){return document.getElementById("vmAgentFallback")?.checked!==false;}
 function vmAgentProvider(){return document.getElementById("vmAgentProvider")?.value||"chatgpt";}
 function vmAgentProviderChanged(){
   const provider=vmAgentProvider();
@@ -1528,6 +1533,7 @@ function newVmChat(){
   const input=document.getElementById("vmAgentTask");if(input)input.value="";
   const mode=document.getElementById("vmAgentMode");if(mode)mode.value="workspace";
   const web=document.getElementById("vmAgentWeb");if(web)web.checked=true;
+  const fallback=document.getElementById("vmAgentFallback");if(fallback)fallback.checked=true;
   document.getElementById("vmAgentMeta").textContent="";
   vmAgentProviderChanged();
   input?.focus();
@@ -1715,12 +1721,12 @@ function parseSseChunk(buffer,onEvent){
   return buffer;
 }
 
-async function vmAgentPostJson(prompt,contextPrompt,mode,provider="openrouter",web=false,chatId=""){
+async function vmAgentPostJson(prompt,contextPrompt,mode,provider="openrouter",web=false,fallback=true,chatId=""){
   return await api("/vm-agent/task",{
     method:"POST",
     headers:{"Content-Type":"application/json"},
     signal:AbortSignal.timeout(305000),
-    body:JSON.stringify({prompt,contextPrompt,mode,provider,web,chatId})
+    body:JSON.stringify({prompt,contextPrompt,mode,provider,web,fallback,chatId})
   });
 }
 
@@ -1729,6 +1735,7 @@ async function runVmAgentTask(){
   const mode=document.getElementById("vmAgentMode").value;
   const provider=vmAgentProvider();
   const web=vmAgentWebEnabled();
+  const fallback=vmAgentFallbackEnabled();
   const button=document.getElementById("vmAgentRunButton");
   const meta=document.getElementById("vmAgentMeta");
   const prompt=input.value.trim();
@@ -1764,7 +1771,7 @@ async function runVmAgentTask(){
       if(authToken)headers.set("Authorization","Bearer "+authToken);
       const r=await fetch(API_BASE_URL+"/vm-agent/task/stream",{
         method:"POST",headers,signal:AbortSignal.timeout(305000),
-        body:JSON.stringify({prompt,contextPrompt,mode,provider,web,chatId:currentVmChat?.id||""})
+        body:JSON.stringify({prompt,contextPrompt,mode,provider,web,fallback,chatId:currentVmChat?.id||""})
       });
       if(r.status===401){clearAuthToken();showLogin();throw new Error("Your CodePilot session expired. Please sign in again.")}
       if(!r.ok){
@@ -1793,7 +1800,7 @@ async function runVmAgentTask(){
       if(e?.noFallback)throw e;
       streamFailure=e;
       meta.textContent="Stream interrupted — retrying normally…";
-      finalData=await vmAgentPostJson(prompt,contextPrompt,mode,provider,web,currentVmChat?.id||"");
+      finalData=await vmAgentPostJson(prompt,contextPrompt,mode,provider,web,fallback,currentVmChat?.id||"");
     }
 
     if(finalData?.ok===false||finalData?.error)throw new Error(finalData.error||"VM Agent task failed.");
@@ -1824,6 +1831,11 @@ async function runVmAgentTask(){
     if(finalData.native_session?.id){
       const label=provider==="codex"?"Codex":provider==="grok"?"Grok":provider==="cursor"?"Cursor":"native";
       runBits.push((finalData.native_session.resumed?"resumed ":"new ")+label+" session");
+    }
+    if(finalData.fallback?.used){
+      runBits.push("fallback "+vmBrainLabel(finalData.fallback.requested_provider)+" → "+vmBrainLabel(finalData.fallback.actual_provider));
+    }else if(fallback){
+      runBits.push("safe fallback armed");
     }
     meta.textContent=runBits.join(" · ");
     setVmAgentStatus("online","Connected");
@@ -2135,7 +2147,7 @@ async function loadVmMissions(){
 async function queueVmCommand(){
   const input=document.getElementById("vmAgentTask"),button=document.getElementById("vmQueueButton");
   const prompt=input.value.trim();if(!prompt||button?.disabled)return;
-  const mode=document.getElementById("vmAgentMode").value,provider=vmAgentProvider(),web=vmAgentWebEnabled();
+  const mode=document.getElementById("vmAgentMode").value,provider=vmAgentProvider(),web=vmAgentWebEnabled(),fallback=vmAgentFallbackEnabled();
   const contextPrompt=buildVmAgentPrompt(prompt);
   if(button)button.disabled=true;
   document.getElementById("vmAgentMeta").textContent="Adding command to this chat queue…";
@@ -2145,7 +2157,7 @@ async function queueVmCommand(){
     const d=await api("/vm-agent/missions",{
       method:"POST",headers:{"Content-Type":"application/json"},
       body:JSON.stringify({
-        prompt,contextPrompt,chatId,mode,provider,web,
+        prompt,contextPrompt,chatId,mode,provider,web,fallback,
         title:prompt.split(/\n/)[0].slice(0,72)
       })
     });
