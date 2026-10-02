@@ -633,7 +633,7 @@ body.auth-locked #authModal{display:grid!important;background:var(--bg)}
       <div id="remoteScreenPlaceholder" class="remote-placeholder">Loading VM desktop…</div>
       <img id="remoteScreenImage" class="remote-screen hidden" alt="VM desktop" draggable="false">
     </div>
-    <div class="remote-note">Auto mode tries WebSocket Turbo first for lower-latency input and faster frames, then falls back to authenticated HTTPS automatically when WebSocket is blocked.</div>
+    <div class="remote-note">Auto mode tries WebSocket Turbo first, then falls back to authenticated HTTPS when blocked. Screen updates pause automatically while this browser tab is hidden and resume when you return.</div>
   </div>
 </section>
 
@@ -766,6 +766,7 @@ const VM_SYSTEM_DEFAULT_METRICS=["agent","browser","watchdog","cpu","ram","disk"
    START
 ========================================================= */
 document.addEventListener("DOMContentLoaded", bootstrap);
+document.addEventListener("visibilitychange", handleRemoteVisibilityChange);
 
 async function bootstrap(){
   setupResizers();
@@ -881,6 +882,20 @@ function markRemoteInteraction(){
   remoteLastInteraction=Date.now();
 }
 
+function handleRemoteVisibilityChange(){
+  if(vmActivePage!=="remote")return;
+  if(document.hidden){
+    clearTimeout(remoteScreenTimer);remoteScreenTimer=null;
+    clearTimeout(remoteMoveTimer);remoteMoveTimer=null;
+    remotePendingMove=null;remotePointerActive=false;
+    closeRemoteSocket();
+    setRemoteScreenStatus("Paused · tab hidden");
+    return;
+  }
+  setRemoteScreenStatus("Resuming…");
+  startRemoteTransport();
+}
+
 function remoteFrameProfile(){
   const active=Date.now()-remoteLastInteraction<1800;
   if(remoteQualityMode==="low")return {quality:38,maxWidth:820,delay:900,turboDelay:650,label:"Low"};
@@ -916,6 +931,10 @@ function fallbackRemoteToHttps(reason="Turbo unavailable"){
 
 function startRemoteTransport(){
   if(vmActivePage!=="remote")return;
+  if(document.hidden){
+    setRemoteScreenStatus("Paused · tab hidden");
+    return;
+  }
   remoteTransportMode=document.getElementById("remoteTransportSelect")?.value||"auto";
   remoteQualityMode=document.getElementById("remoteQualitySelect")?.value||"auto";
   clearTimeout(remoteScreenTimer);remoteScreenTimer=null;
@@ -931,7 +950,7 @@ function startRemoteTransport(){
 }
 
 function connectRemoteSocket(){
-  if(vmActivePage!=="remote"||!authToken)return;
+  if(vmActivePage!=="remote"||document.hidden||!authToken)return;
   closeRemoteSocket();
   setRemoteScreenStatus("Connecting WebSocket Turbo…");
   let socket;
@@ -1073,7 +1092,7 @@ async function pasteRemoteClipboard(){
 
 function scheduleRemoteScreen(delay){
   clearTimeout(remoteScreenTimer);remoteScreenTimer=null;
-  if(vmActivePage!=="remote")return;
+  if(vmActivePage!=="remote"||document.hidden)return;
   const profile=remoteFrameProfile();
   const wait=delay??(remoteTurboActive?profile.turboDelay:profile.delay);
   remoteScreenTimer=setTimeout(()=>{
@@ -1104,7 +1123,7 @@ async function showRemoteFrameBlob(blob){
 }
 
 async function refreshRemoteScreen(force=false){
-  if(vmActivePage!=="remote")return;
+  if(vmActivePage!=="remote"||document.hidden)return;
   if(remoteTurboActive&&remoteSocket?.readyState===WebSocket.OPEN){
     requestRemoteTurboFrame(force);
     return;
