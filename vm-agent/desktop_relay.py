@@ -8,6 +8,7 @@ import tempfile
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from urllib.parse import parse_qs, urlparse
 from PIL import Image
 
 HOST = "127.0.0.1"
@@ -93,7 +94,9 @@ def type_ascii(d, text):
         if shifted:
             XTST.XTestFakeKeyEvent(d, shift_code, 0, 0)
 
-def capture_jpeg():
+def capture_jpeg(max_width=None, quality=None):
+    max_width = max(480, min(1440, int(max_width or os.environ.get("CODEPILOT_DESKTOP_MAX_WIDTH", "1280"))))
+    quality = max(30, min(82, int(quality or os.environ.get("CODEPILOT_DESKTOP_JPEG_QUALITY", "58"))))
     with capture_lock:
         with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as f:
             path = f.name
@@ -109,12 +112,11 @@ def capture_jpeg():
             with Image.open(path) as im:
                 im = im.convert("RGB")
                 source_w, source_h = im.size
-                max_w = int(os.environ.get("CODEPILOT_DESKTOP_MAX_WIDTH", "1280"))
-                if im.width > max_w:
-                    ratio = max_w / im.width
-                    im = im.resize((max_w, max(1, int(im.height * ratio))))
+                if im.width > max_width:
+                    ratio = max_width / im.width
+                    im = im.resize((max_width, max(1, int(im.height * ratio))))
                 out = io.BytesIO()
-                im.save(out, format="JPEG", quality=int(os.environ.get("CODEPILOT_DESKTOP_JPEG_QUALITY", "58")), optimize=True)
+                im.save(out, format="JPEG", quality=quality, optimize=True)
                 return out.getvalue(), source_w, source_h
         finally:
             try:
@@ -187,7 +189,8 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.write(raw)
 
     def do_GET(self):
-        if self.path.startswith("/health"):
+        parsed = urlparse(self.path)
+        if parsed.path.startswith("/health"):
             try:
                 d = open_display()
                 w, h = display_size(d)
@@ -196,9 +199,12 @@ class Handler(BaseHTTPRequestHandler):
             except Exception as e:
                 self._json(503, {"ok": False, "error": str(e)})
             return
-        if self.path.startswith("/frame"):
+        if parsed.path.startswith("/frame"):
             try:
-                raw, w, h = capture_jpeg()
+                query = parse_qs(parsed.query)
+                quality = query.get("quality", [None])[0]
+                max_width = query.get("max_width", [None])[0]
+                raw, w, h = capture_jpeg(max_width=max_width, quality=quality)
                 self.send_response(200)
                 self.send_header("Content-Type", "image/jpeg")
                 self.send_header("Content-Length", str(len(raw)))
