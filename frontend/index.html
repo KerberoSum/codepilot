@@ -584,7 +584,7 @@ body.auth-locked #authModal{display:grid!important;background:var(--bg)}
   <header class="agent-page-top">
     <div class="agent-page-brand">
       <div class="logo">▣</div>
-      <div><strong>CodePilot Remote Screen</strong><br><span>HTTPS polling fallback · no WebSocket · no Guacamole tunnel</span></div>
+      <div><strong>CodePilot Remote Screen</strong><br><span>Auto transport · WebSocket Turbo with HTTPS fallback</span></div>
     </div>
     <div class="agent-page-actions">
       <button class="agent-page-tab" onclick="switchAppPage('agent')">← VM Agent</button>
@@ -595,6 +595,11 @@ body.auth-locked #authModal{display:grid!important;background:var(--bg)}
   <div class="remote-body">
     <div class="remote-toolbar">
       <span id="remoteScreenStatus" class="remote-status">Connecting…</span>
+      <select id="remoteTransportSelect" class="agent-secondary" onchange="remoteTransportChanged()" title="Remote screen transport">
+        <option value="auto" selected>Auto · Turbo first</option>
+        <option value="turbo">WebSocket Turbo</option>
+        <option value="https">HTTPS Compatible</option>
+      </select>
       <select id="remoteQualitySelect" class="agent-secondary" onchange="remoteQualityChanged()" title="Remote screen quality / bandwidth">
         <option value="auto" selected>Auto bandwidth</option>
         <option value="low">Low bandwidth</option>
@@ -628,7 +633,7 @@ body.auth-locked #authModal{display:grid!important;background:var(--bg)}
       <div id="remoteScreenPlaceholder" class="remote-placeholder">Loading VM desktop…</div>
       <img id="remoteScreenImage" class="remote-screen hidden" alt="VM desktop" draggable="false">
     </div>
-    <div class="remote-note">Click/touch the screen to control the VM. Keyboard works when the screen has focus. This fallback uses ordinary authenticated HTTPS requests only; no browser WebSocket connection is required.</div>
+    <div class="remote-note">Auto mode tries WebSocket Turbo first for lower-latency input and faster frames, then falls back to authenticated HTTPS automatically when WebSocket is blocked.</div>
   </div>
 </section>
 
@@ -745,6 +750,8 @@ let vmCapabilitiesCache=null;
 let terminalCwd="/srv/codepilot-workspace", terminalHistory=[], terminalHistoryIndex=0;
 let remoteScreenTimer=null, remoteScreenBusy=false, remoteScreenObjectUrl="", remotePointerActive=false, remoteMoveTimer=null, remotePendingMove=null;
 let remoteViewOnly=false, remoteZoom=1, remoteQualityMode="auto", remoteLastInteraction=0, remoteLastFrameMs=0;
+let remoteSocket=null, remoteSocketConnectTimer=null, remoteSocketFramePending=false, remoteSocketClosing=false;
+let remoteTransportMode="auto", remoteTurboActive=false, remoteTurboFailed=false, remoteTurboFrameStarted=0, remoteTurboMeta=null;
 const ATTACH_MAX_FILES=5;
 const ATTACH_MAX_FILE_BYTES=500*1024;
 const ATTACH_MAX_TOTAL_BYTES=1024*1024;
@@ -847,10 +854,23 @@ function setRemoteScreenStatus(text,state=""){
   el.textContent=text;el.className="remote-status"+(state?" "+state:"");
 }
 
+function closeRemoteSocket(){
+  clearTimeout(remoteSocketConnectTimer);remoteSocketConnectTimer=null;
+  const socket=remoteSocket;
+  remoteSocket=null;remoteTurboActive=false;remoteSocketFramePending=false;remoteTurboMeta=null;
+  if(socket){
+    try{socket.codepilotIntentional=true}catch{}
+    try{
+      if(socket.readyState===WebSocket.OPEN||socket.readyState===WebSocket.CONNECTING)socket.close(1000,"transport change");
+    }catch{}
+  }
+}
+
 function stopRemoteScreen(){
   clearTimeout(remoteScreenTimer);remoteScreenTimer=null;
   remoteScreenBusy=false;remotePointerActive=false;remotePendingMove=null;
   clearTimeout(remoteMoveTimer);remoteMoveTimer=null;
+  closeRemoteSocket();
   if(remoteScreenObjectUrl){
     URL.revokeObjectURL(remoteScreenObjectUrl);
     remoteScreenObjectUrl="";
@@ -863,11 +883,149 @@ function markRemoteInteraction(){
 
 function remoteFrameProfile(){
   const active=Date.now()-remoteLastInteraction<1800;
-  if(remoteQualityMode==="low")return {quality:38,maxWidth:820,delay:1200,label:"Low"};
-  if(remoteQualityMode==="high")return {quality:72,maxWidth:1440,delay:1050,label:"High"};
+  if(remoteQualityMode==="low")return {quality:38,maxWidth:820,delay:1200,turboDelay:650,label:"Low"};
+  if(remoteQualityMode==="high")return {quality:72,maxWidth:1440,delay:1050,turboDelay:450,label:"High"};
   return active
-    ?{quality:42,maxWidth:960,delay:650,label:"Auto · responsive"}
-    :{quality:62,maxWidth:1280,delay:1000,label:"Auto · sharp"};
+    ?{quality:42,maxWidth:960,delay:650,turboDelay:250,label:"Auto · responsive"}
+    :{quality:62,maxWidth:1280,delay:1000,turboDelay:450,label:"Auto · sharp"};
+}
+
+function remoteWebSocketUrl(){
+  const target=new URL(API_BASE_URL);
+  target.protocol=target.protocol==="https:"?"wss:":"ws:";
+  target.pathname=target.pathname.replace(/\/+$/,"")+"/vm-desktop/ws";
+  target.search="";target.hash="";
+  return target.toString();
+}
+
+function remoteTransportChanged(){
+  remoteTransportMode=document.getElementById("remoteTransportSelect")?.value||"auto";
+  remoteTurboFailed=false;
+  clearTimeout(remoteScreenTimer);remoteScreenTimer=null;
+  closeRemoteSocket();
+  if(vmActivePage==="remote")startRemoteTransport();
+}
+
+function fallbackRemoteToHttps(reason="Turbo unavailable"){
+  closeRemoteSocket();
+  remoteTurboFailed=true;
+  if(vmActivePage!=="remote")return;
+  setRemoteScreenStatus(reason+" · HTTPS fallback");
+  refreshRemoteScreen(true);
+}
+
+function startRemoteTransport(){
+  if(vmActivePage!=="remote")return;
+  remoteTransportMode=document.getElementById("remoteTransportSelect")?.value||"auto";
+  remoteQualityMode=document.getElementById("remoteQualitySelect")?.value||"auto";
+  clearTimeout(remoteScreenTimer);remoteScreenTimer=null;
+  if(remoteTransportMode==="https"){
+    remoteTurboFailed=true;
+    closeRemoteSocket();
+    setRemoteScreenStatus("HTTPS compatible mode");
+    refreshRemoteScreen(true);
+    return;
+  }
+  remoteTurboFailed=false;
+  connectRemoteSocket();
+}
+
+function connectRemoteSocket(){
+  if(vmActivePage!=="remote"||!authToken)return;
+  closeRemoteSocket();
+  setRemoteScreenStatus("Connecting WebSocket Turbo…");
+  let socket;
+  try{
+    socket=new WebSocket(remoteWebSocketUrl(),["codepilot",authToken]);
+  }catch(e){
+    fallbackRemoteToHttps("Turbo could not start");
+    return;
+  }
+  remoteSocket=socket;
+  socket.binaryType="arraybuffer";
+  remoteSocketConnectTimer=setTimeout(()=>{
+    if(remoteSocket===socket&&socket.readyState!==WebSocket.OPEN){
+      try{socket.codepilotIntentional=true;socket.close()}catch{}
+      fallbackRemoteToHttps("Turbo connection timed out");
+    }
+  },4500);
+
+  socket.onopen=()=>{
+    if(remoteSocket!==socket)return;
+    clearTimeout(remoteSocketConnectTimer);remoteSocketConnectTimer=null;
+    remoteTurboActive=true;remoteTurboFailed=false;remoteSocketFramePending=false;
+    setRemoteScreenStatus("Turbo connected","ready");
+    requestRemoteTurboFrame(true);
+  };
+
+  socket.onmessage=async event=>{
+    if(remoteSocket!==socket)return;
+    if(typeof event.data==="string"){
+      let msg={};try{msg=JSON.parse(event.data)}catch{return}
+      if(msg.type==="ready"){
+        remoteTurboActive=true;
+        setRemoteScreenStatus("Turbo ready","ready");
+      }else if(msg.type==="frame_meta"){
+        remoteTurboMeta=msg;
+      }else if(msg.type==="error"){
+        remoteSocketFramePending=false;
+        setRemoteScreenStatus("Turbo · "+(msg.error||"request failed"),"error");
+        scheduleRemoteScreen(900);
+      }
+      return;
+    }
+
+    clearTimeout(remoteScreenTimer);remoteScreenTimer=null;
+    remoteSocketFramePending=false;
+    const elapsed=Math.round(performance.now()-remoteTurboFrameStarted);
+    try{
+      const blob=event.data instanceof Blob?event.data:new Blob([event.data],{type:"image/jpeg"});
+      await showRemoteFrameBlob(blob);
+      remoteLastFrameMs=elapsed;
+      const serverMs=Number(remoteTurboMeta?.elapsed_ms||0);
+      setRemoteScreenStatus("Turbo · "+elapsed+" ms"+(serverMs?" · VM "+serverMs+" ms":""),"ready");
+    }catch(e){
+      setRemoteScreenStatus(e.message||"Turbo frame decode failed","error");
+    }finally{
+      remoteTurboMeta=null;
+      scheduleRemoteScreen();
+    }
+  };
+
+  socket.onerror=()=>{};
+  socket.onclose=()=>{
+    const intentional=socket.codepilotIntentional===true;
+    if(remoteSocket===socket){
+      remoteSocket=null;remoteTurboActive=false;remoteSocketFramePending=false;
+    }
+    clearTimeout(remoteSocketConnectTimer);remoteSocketConnectTimer=null;
+    if(!intentional&&vmActivePage==="remote"){
+      fallbackRemoteToHttps("WebSocket Turbo disconnected");
+    }
+  };
+}
+
+function requestRemoteTurboFrame(force=false){
+  const socket=remoteSocket;
+  if(!remoteTurboActive||!socket||socket.readyState!==WebSocket.OPEN||remoteSocketFramePending)return false;
+  const profile=remoteFrameProfile();
+  remoteSocketFramePending=true;remoteTurboFrameStarted=performance.now();remoteTurboMeta=null;
+  if(force)setRemoteScreenStatus("Turbo · refreshing…");
+  try{
+    socket.send(JSON.stringify({type:"frame",quality:profile.quality,max_width:profile.maxWidth}));
+  }catch(e){
+    remoteSocketFramePending=false;
+    fallbackRemoteToHttps("Turbo send failed");
+    return false;
+  }
+  clearTimeout(remoteScreenTimer);
+  remoteScreenTimer=setTimeout(()=>{
+    if(remoteSocket===socket&&remoteSocketFramePending){
+      remoteSocketFramePending=false;
+      try{socket.close(1011,"frame timeout")}catch{}
+    }
+  },12000);
+  return true;
 }
 
 function remoteQualityChanged(){
@@ -917,16 +1075,45 @@ function scheduleRemoteScreen(delay){
   clearTimeout(remoteScreenTimer);remoteScreenTimer=null;
   if(vmActivePage!=="remote")return;
   const profile=remoteFrameProfile();
-  remoteScreenTimer=setTimeout(()=>refreshRemoteScreen(false),delay??profile.delay);
+  const wait=delay??(remoteTurboActive?profile.turboDelay:profile.delay);
+  remoteScreenTimer=setTimeout(()=>{
+    if(remoteTurboActive)requestRemoteTurboFrame(false);
+    else refreshRemoteScreen(false);
+  },wait);
+}
+
+async function showRemoteFrameBlob(blob){
+  const nextUrl=URL.createObjectURL(blob);
+  const img=document.getElementById("remoteScreenImage");
+  const placeholder=document.getElementById("remoteScreenPlaceholder");
+  if(!img){URL.revokeObjectURL(nextUrl);return;}
+  try{
+    await new Promise((resolve,reject)=>{
+      img.onload=()=>resolve();
+      img.onerror=()=>reject(new Error("Remote frame could not be decoded."));
+      img.src=nextUrl;
+    });
+  }catch(e){
+    URL.revokeObjectURL(nextUrl);
+    throw e;
+  }
+  if(remoteScreenObjectUrl)URL.revokeObjectURL(remoteScreenObjectUrl);
+  remoteScreenObjectUrl=nextUrl;
+  img.classList.remove("hidden");placeholder?.classList.add("hidden");
+  setRemoteZoom(remoteZoom);
 }
 
 async function refreshRemoteScreen(force=false){
   if(vmActivePage!=="remote")return;
+  if(remoteTurboActive&&remoteSocket?.readyState===WebSocket.OPEN){
+    requestRemoteTurboFrame(force);
+    return;
+  }
   if(remoteScreenBusy)return;
   remoteScreenBusy=true;
   const profile=remoteFrameProfile();
   const started=performance.now();
-  if(force)setRemoteScreenStatus("Refreshing…");
+  if(force)setRemoteScreenStatus(remoteTurboFailed?"HTTPS fallback · refreshing…":"Refreshing…");
   try{
     const query="?quality="+profile.quality+"&max_width="+profile.maxWidth+"&t="+Date.now();
     const r=await fetch(API_BASE_URL+"/vm-desktop/frame"+query,{
@@ -940,22 +1127,9 @@ async function refreshRemoteScreen(force=false){
       try{const d=await r.json();msg=d.error||d.detail||msg}catch{}
       throw new Error(msg);
     }
-    const blob=await r.blob();
-    const nextUrl=URL.createObjectURL(blob);
-    const img=document.getElementById("remoteScreenImage");
-    const placeholder=document.getElementById("remoteScreenPlaceholder");
-    if(!img){URL.revokeObjectURL(nextUrl);return;}
-    await new Promise((resolve,reject)=>{
-      img.onload=()=>resolve();
-      img.onerror=()=>reject(new Error("Remote frame could not be decoded."));
-      img.src=nextUrl;
-    });
-    if(remoteScreenObjectUrl)URL.revokeObjectURL(remoteScreenObjectUrl);
-    remoteScreenObjectUrl=nextUrl;
-    img.classList.remove("hidden");placeholder?.classList.add("hidden");
-    setRemoteZoom(remoteZoom);
+    await showRemoteFrameBlob(await r.blob());
     remoteLastFrameMs=Math.round(performance.now()-started);
-    setRemoteScreenStatus("Live · "+remoteLastFrameMs+" ms · "+profile.label,"ready");
+    setRemoteScreenStatus((remoteTurboFailed?"HTTPS fallback":"HTTPS")+" · "+remoteLastFrameMs+" ms · "+profile.label,"ready");
   }catch(e){
     setRemoteScreenStatus(e.message||"Remote screen unavailable","error");
     const placeholder=document.getElementById("remoteScreenPlaceholder");
@@ -969,6 +1143,21 @@ async function refreshRemoteScreen(force=false){
 async function sendRemoteInput(payload,{refresh=true}={}){
   if(remoteViewOnly){setRemoteScreenStatus("View only · input blocked","error");return null;}
   markRemoteInteraction();
+
+  const socket=remoteSocket;
+  if(remoteTurboActive&&socket?.readyState===WebSocket.OPEN){
+    try{
+      socket.send(JSON.stringify({type:"input",payload}));
+      if(refresh&&vmActivePage==="remote"){
+        clearTimeout(remoteScreenTimer);
+        remoteScreenTimer=setTimeout(()=>requestRemoteTurboFrame(true),70);
+      }
+      return {ok:true,transport:"websocket"};
+    }catch(e){
+      fallbackRemoteToHttps("Turbo input failed");
+    }
+  }
+
   try{
     const r=await fetch(API_BASE_URL+"/vm-desktop/input",{
       method:"POST",
@@ -1019,7 +1208,7 @@ function remotePointerMove(e){
     remoteMoveTimer=null;
     const move=remotePendingMove;remotePendingMove=null;
     if(move)sendRemoteInput({type:"move",...move},{refresh:false});
-  },65);
+  },remoteTurboActive?35:65);
 }
 
 function remotePointerUp(e){
@@ -1208,7 +1397,7 @@ function switchAppPage(page){
   }else if(page==="remote"){
     checkVmAgent(false);
     setTimeout(()=>document.getElementById("remoteStage")?.focus(),30);
-    refreshRemoteScreen(true);
+    startRemoteTransport();
   }
 }
 
