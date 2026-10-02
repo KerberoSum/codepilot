@@ -190,6 +190,7 @@ body.auth-locked #authModal{display:grid!important;background:var(--bg)}
 .remote-toolbar .remote-status{font-size:9px;color:var(--muted);min-width:100px}.remote-toolbar .remote-status.ready{color:var(--green)}.remote-toolbar .remote-status.error{color:var(--red)}
 .remote-stage{flex:1;min-height:0;overflow:auto;display:flex;align-items:flex-start;justify-content:center;background:#020305;outline:none;touch-action:none;user-select:none}
 .remote-stage:focus{box-shadow:inset 0 0 0 1px rgba(116,87,255,.55)}
+.remote-stage.view-only .remote-screen{cursor:not-allowed;opacity:.94}
 .remote-screen{display:block;max-width:100%;height:auto;cursor:default;user-select:none;-webkit-user-drag:none}
 .remote-placeholder{padding:40px;color:var(--muted);font-size:11px;text-align:center}
 .remote-text-input{min-width:180px;flex:1;max-width:480px;border:1px solid var(--border);border-radius:7px;background:#090d13;color:#fff;padding:7px 9px;font-size:10px;outline:none}
@@ -590,12 +591,26 @@ body.auth-locked #authModal{display:grid!important;background:var(--bg)}
   <div class="remote-body">
     <div class="remote-toolbar">
       <span id="remoteScreenStatus" class="remote-status">Connecting…</span>
+      <select id="remoteQualitySelect" class="agent-secondary" onchange="remoteQualityChanged()" title="Remote screen quality / bandwidth">
+        <option value="auto" selected>Auto bandwidth</option>
+        <option value="low">Low bandwidth</option>
+        <option value="high">High quality</option>
+      </select>
+      <button id="remoteViewOnlyButton" class="agent-secondary" onclick="toggleRemoteViewOnly()">Control</button>
+      <button class="agent-secondary" onclick="toggleRemoteFullscreen()">Fullscreen</button>
+      <button class="agent-secondary" onclick="setRemoteZoom(remoteZoom-.15)">−</button>
+      <button id="remoteZoomLabel" class="agent-secondary" onclick="setRemoteZoom(1)">100%</button>
+      <button class="agent-secondary" onclick="setRemoteZoom(remoteZoom+.15)">＋</button>
       <button class="agent-secondary" onclick="refreshRemoteScreen(true)">Refresh</button>
       <button class="agent-secondary" onclick="sendRemoteKey('Enter')">Enter</button>
       <button class="agent-secondary" onclick="sendRemoteKey('Backspace')">⌫</button>
+      <button class="agent-secondary" onclick="sendRemoteKey('Escape')">Esc</button>
+      <button class="agent-secondary" onclick="sendRemoteKey('Tab')">Tab</button>
+      <button class="agent-secondary" onclick="sendRemoteChord(['Control','l'])">Ctrl+L</button>
+      <button class="agent-secondary" onclick="sendRemoteChord(['Control','c'])">Ctrl+C</button>
+      <button class="agent-secondary" onclick="pasteRemoteClipboard()">Paste local</button>
       <input id="remoteTextInput" class="remote-text-input" placeholder="Type text here, then Send" onkeydown="remoteTextKeydown(event)">
       <button class="agent-secondary" onclick="sendRemoteText()">Send text</button>
-      <button class="agent-secondary" onclick="sendRemoteChord(['Control','l'])">Ctrl+L</button>
     </div>
     <div id="remoteStage" class="remote-stage" tabindex="0"
       onkeydown="remoteStageKeydown(event)"
@@ -724,6 +739,7 @@ let vmChats=[], currentVmChat=null, vmAgentMessages=[], vmRemoteBusy=false, vmPr
 let vmCapabilitiesCache=null;
 let terminalCwd="/srv/codepilot-workspace", terminalHistory=[], terminalHistoryIndex=0;
 let remoteScreenTimer=null, remoteScreenBusy=false, remoteScreenObjectUrl="", remotePointerActive=false, remoteMoveTimer=null, remotePendingMove=null;
+let remoteViewOnly=false, remoteZoom=1, remoteQualityMode="auto", remoteLastInteraction=0, remoteLastFrameMs=0;
 const ATTACH_MAX_FILES=5;
 const ATTACH_MAX_FILE_BYTES=500*1024;
 const ATTACH_MAX_TOTAL_BYTES=1024*1024;
@@ -836,19 +852,79 @@ function stopRemoteScreen(){
   }
 }
 
-function scheduleRemoteScreen(delay=1100){
+function markRemoteInteraction(){
+  remoteLastInteraction=Date.now();
+}
+
+function remoteFrameProfile(){
+  const active=Date.now()-remoteLastInteraction<1800;
+  if(remoteQualityMode==="low")return {quality:38,maxWidth:820,delay:1200,label:"Low"};
+  if(remoteQualityMode==="high")return {quality:72,maxWidth:1440,delay:1050,label:"High"};
+  return active
+    ?{quality:42,maxWidth:960,delay:650,label:"Auto · responsive"}
+    :{quality:62,maxWidth:1280,delay:1000,label:"Auto · sharp"};
+}
+
+function remoteQualityChanged(){
+  remoteQualityMode=document.getElementById("remoteQualitySelect")?.value||"auto";
+  markRemoteInteraction();
+  refreshRemoteScreen(true);
+}
+
+function toggleRemoteViewOnly(){
+  remoteViewOnly=!remoteViewOnly;
+  const btn=document.getElementById("remoteViewOnlyButton");
+  if(btn){btn.textContent=remoteViewOnly?"View only":"Control";btn.title=remoteViewOnly?"Input is blocked. Click to enable control.":"Input is enabled. Click for view-only mode.";}
+  document.getElementById("remoteStage")?.classList.toggle("view-only",remoteViewOnly);
+  setRemoteScreenStatus(remoteViewOnly?"View only":"Control enabled",remoteViewOnly?"":"ready");
+}
+
+function setRemoteZoom(value){
+  remoteZoom=Math.max(.5,Math.min(2.5,Number(value)||1));
+  const img=document.getElementById("remoteScreenImage"),label=document.getElementById("remoteZoomLabel");
+  if(img){img.style.maxWidth="none";img.style.width=(remoteZoom*100)+"%";}
+  if(label)label.textContent=Math.round(remoteZoom*100)+"%";
+}
+
+async function toggleRemoteFullscreen(){
+  const page=document.getElementById("remotePage");
+  try{
+    if(document.fullscreenElement)await document.exitFullscreen();
+    else await page?.requestFullscreen?.();
+  }catch(e){setRemoteScreenStatus(e.message||"Fullscreen unavailable","error");}
+}
+
+async function pasteRemoteClipboard(){
+  if(remoteViewOnly)return setRemoteScreenStatus("View only · input blocked","error");
+  try{
+    const text=await navigator.clipboard.readText();
+    if(!text)return;
+    const chunks=text.slice(0,2000).match(/[\s\S]{1,450}/g)||[];
+    for(const chunk of chunks)await sendRemoteInput({type:"text",text:chunk},{refresh:false});
+    markRemoteInteraction();
+    scheduleRemoteScreen(120);
+  }catch(e){
+    setRemoteScreenStatus("Clipboard unavailable · use the text box instead","error");
+  }
+}
+
+function scheduleRemoteScreen(delay){
   clearTimeout(remoteScreenTimer);remoteScreenTimer=null;
   if(vmActivePage!=="remote")return;
-  remoteScreenTimer=setTimeout(()=>refreshRemoteScreen(false),delay);
+  const profile=remoteFrameProfile();
+  remoteScreenTimer=setTimeout(()=>refreshRemoteScreen(false),delay??profile.delay);
 }
 
 async function refreshRemoteScreen(force=false){
   if(vmActivePage!=="remote")return;
-  if(remoteScreenBusy&&!force)return;
+  if(remoteScreenBusy)return;
   remoteScreenBusy=true;
-  setRemoteScreenStatus("Refreshing…");
+  const profile=remoteFrameProfile();
+  const started=performance.now();
+  if(force)setRemoteScreenStatus("Refreshing…");
   try{
-    const r=await fetch(API_BASE_URL+"/vm-desktop/frame",{
+    const query="?quality="+profile.quality+"&max_width="+profile.maxWidth+"&t="+Date.now();
+    const r=await fetch(API_BASE_URL+"/vm-desktop/frame"+query,{
       method:"GET",cache:"no-store",
       headers:authToken?{"Authorization":"Bearer "+authToken}:{},
       signal:AbortSignal.timeout(16000)
@@ -872,18 +948,22 @@ async function refreshRemoteScreen(force=false){
     if(remoteScreenObjectUrl)URL.revokeObjectURL(remoteScreenObjectUrl);
     remoteScreenObjectUrl=nextUrl;
     img.classList.remove("hidden");placeholder?.classList.add("hidden");
-    setRemoteScreenStatus("Live · HTTPS polling","ready");
+    setRemoteZoom(remoteZoom);
+    remoteLastFrameMs=Math.round(performance.now()-started);
+    setRemoteScreenStatus("Live · "+remoteLastFrameMs+" ms · "+profile.label,"ready");
   }catch(e){
     setRemoteScreenStatus(e.message||"Remote screen unavailable","error");
     const placeholder=document.getElementById("remoteScreenPlaceholder");
     if(placeholder){placeholder.textContent=e.message||"Remote screen unavailable.";placeholder.classList.remove("hidden");}
   }finally{
     remoteScreenBusy=false;
-    scheduleRemoteScreen(1100);
+    scheduleRemoteScreen();
   }
 }
 
 async function sendRemoteInput(payload,{refresh=true}={}){
+  if(remoteViewOnly){setRemoteScreenStatus("View only · input blocked","error");return null;}
+  markRemoteInteraction();
   try{
     const r=await fetch(API_BASE_URL+"/vm-desktop/input",{
       method:"POST",
@@ -917,6 +997,7 @@ function remotePoint(e){
 function remoteButton(e){return e.button===2?3:e.button===1?2:1;}
 
 function remotePointerDown(e){
+  if(remoteViewOnly)return;
   const p=remotePoint(e);if(!p)return;
   e.preventDefault();document.getElementById("remoteStage")?.focus();
   remotePointerActive=true;
@@ -946,6 +1027,7 @@ function remotePointerUp(e){
 }
 
 function remoteWheel(e){
+  if(remoteViewOnly)return;
   const p=remotePoint(e);if(!p)return;
   e.preventDefault();
   sendRemoteInput({type:"move",...p},{refresh:false});
@@ -968,7 +1050,7 @@ function remoteTextKeydown(e){
 }
 
 function remoteStageKeydown(e){
-  if(vmActivePage!=="remote")return;
+  if(vmActivePage!=="remote"||remoteViewOnly)return;
   if(["Shift","Control","Alt","Meta"].includes(e.key))return;
   const modifier=e.ctrlKey||e.metaKey||e.altKey;
   if(modifier){
