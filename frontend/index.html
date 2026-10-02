@@ -473,6 +473,7 @@ body.auth-locked #authModal{display:grid!important;background:var(--bg)}
           <div id="vmSystemMetrics" class="agent-system-metrics">
             <div class="agent-system-chip" data-vm-metric="agent"><span>Agent</span><b id="remoteWorkerCapability">Checking…</b></div>
             <div class="agent-system-chip" data-vm-metric="browser"><span>Web</span><b id="browserCapability">Checking…</b></div>
+            <div class="agent-system-chip" data-vm-metric="watchdog"><span>Heal</span><b id="workerWatchdog">—</b></div>
             <div class="agent-system-chip" data-vm-metric="cpu"><span>CPU</span><b id="workerCpu">—</b></div>
             <div class="agent-system-chip" data-vm-metric="ram"><span>RAM</span><b id="workerRam">—</b></div>
             <div class="agent-system-chip" data-vm-metric="disk"><span>Disk</span><b id="workerDisk">—</b></div>
@@ -486,6 +487,7 @@ body.auth-locked #authModal{display:grid!important;background:var(--bg)}
         <div id="vmSystemSettings" class="agent-system-settings hidden">
           <label><input type="checkbox" data-vm-system-toggle="agent" onchange="saveVmSystemPrefs()">Agent</label>
           <label><input type="checkbox" data-vm-system-toggle="browser" onchange="saveVmSystemPrefs()">Web</label>
+          <label><input type="checkbox" data-vm-system-toggle="watchdog" onchange="saveVmSystemPrefs()">Self-heal</label>
           <label><input type="checkbox" data-vm-system-toggle="cpu" onchange="saveVmSystemPrefs()">CPU</label>
           <label><input type="checkbox" data-vm-system-toggle="ram" onchange="saveVmSystemPrefs()">RAM</label>
           <label><input type="checkbox" data-vm-system-toggle="disk" onchange="saveVmSystemPrefs()">Disk</label>
@@ -726,11 +728,11 @@ const ATTACH_MAX_FILES=5;
 const ATTACH_MAX_FILE_BYTES=500*1024;
 const ATTACH_MAX_TOTAL_BYTES=1024*1024;
 const ATTACH_ALLOWED_EXT=new Set(["html","htm","css","js","mjs","cjs","ts","jsx","tsx","json","md","txt","py","sql","xml","yaml","yml","csv"]);
-const VM_SYSTEM_PREFS_KEY="codepilot-vm-system-prefs-v1";
+const VM_SYSTEM_PREFS_KEY="codepilot-vm-system-prefs-v2";
 const VM_BRAIN_TESTS_KEY="codepilot-vm-brain-tests-v1";
 const VM_BRAIN_ORDER=["chatgpt_desktop","chatgpt","codex","cursor","openrouter","grok","gemini"];
-const VM_SYSTEM_METRICS=["agent","browser","cpu","ram","disk","queue","duration","tokens","model","cost"];
-const VM_SYSTEM_DEFAULT_METRICS=["agent","browser","cpu","ram","disk","queue"];
+const VM_SYSTEM_METRICS=["agent","browser","watchdog","cpu","ram","disk","queue","duration","tokens","model","cost"];
+const VM_SYSTEM_DEFAULT_METRICS=["agent","browser","watchdog","cpu","ram","disk","queue"];
 
 /* =========================================================
    START
@@ -1941,7 +1943,7 @@ function toggleAgentPanel(force){
 }
 
 async function loadVmCapabilities(){
-  const worker=document.getElementById("remoteWorkerCapability"),browser=document.getElementById("browserCapability");
+  const worker=document.getElementById("remoteWorkerCapability"),browser=document.getElementById("browserCapability"),watchdog=document.getElementById("workerWatchdog");
   try{
     const d=await api("/vm-agent/capabilities",{signal:AbortSignal.timeout(12000)});
     vmCapabilitiesCache=d;
@@ -1993,6 +1995,21 @@ async function loadVmCapabilities(){
         browser.textContent=b.chromium_detected?"Setup needed":"Not installed";
         browser.className="warn";
         browser.title="Install VM browser tools to enable interactive browsing.";
+      }
+    }
+    const w=d.watchdog||{};
+    if(watchdog){
+      if(!w.available){
+        watchdog.textContent="Not installed";watchdog.className="warn";watchdog.title=w.reason||"Self-healing watchdog is not installed.";
+      }else if(w.stale){
+        watchdog.textContent="Stale";watchdog.className="warn";watchdog.title="Watchdog status is older than expected.";
+      }else if(w.healthy){
+        const repairs=Array.isArray(w.repairs)?w.repairs:[];
+        watchdog.textContent=repairs.length?"Repaired":"Healthy";watchdog.className="ready";
+        watchdog.title=(repairs.length?("Last repair: "+repairs.join(", ")):"All monitored components are healthy.")+(w.checked_at?("\nChecked: "+w.checked_at):"");
+      }else{
+        const bad=Object.entries(w.components||{}).filter(([,ok])=>ok===false).map(([name])=>name.replaceAll("_"," "));
+        watchdog.textContent="Repairing";watchdog.className="warn";watchdog.title=bad.length?("Needs attention: "+bad.join(", ")):"One or more monitored components are unhealthy.";
       }
     }
     const cpu=document.getElementById("workerCpu"),ram=document.getElementById("workerRam"),disk=document.getElementById("workerDisk"),queue=document.getElementById("workerQueue");
