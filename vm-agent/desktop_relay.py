@@ -21,6 +21,26 @@ capture_lock = threading.Lock()
 
 X11 = ctypes.CDLL("libX11.so.6")
 XTST = ctypes.CDLL("libXtst.so.6")
+class XImage(ctypes.Structure):
+    _fields_ = [
+        ("width", ctypes.c_int),
+        ("height", ctypes.c_int),
+        ("xoffset", ctypes.c_int),
+        ("format", ctypes.c_int),
+        ("data", ctypes.c_void_p),
+        ("byte_order", ctypes.c_int),
+        ("bitmap_unit", ctypes.c_int),
+        ("bitmap_bit_order", ctypes.c_int),
+        ("bitmap_pad", ctypes.c_int),
+        ("depth", ctypes.c_int),
+        ("bytes_per_line", ctypes.c_int),
+        ("bits_per_pixel", ctypes.c_int),
+        ("red_mask", ctypes.c_ulong),
+        ("green_mask", ctypes.c_ulong),
+        ("blue_mask", ctypes.c_ulong),
+    ]
+
+
 X11.XOpenDisplay.restype = ctypes.c_void_p
 X11.XCloseDisplay.argtypes = [ctypes.c_void_p]
 X11.XDefaultRootWindow.argtypes = [ctypes.c_void_p]
@@ -35,6 +55,13 @@ XTST.XTestFakeKeyEvent.argtypes = [ctypes.c_void_p, ctypes.c_uint, ctypes.c_int,
 XTST.XTestFakeButtonEvent.argtypes = [ctypes.c_void_p, ctypes.c_uint, ctypes.c_int, ctypes.c_ulong]
 X11.XWarpPointer.argtypes = [ctypes.c_void_p, ctypes.c_ulong, ctypes.c_ulong, ctypes.c_int, ctypes.c_int, ctypes.c_uint, ctypes.c_uint, ctypes.c_int, ctypes.c_int]
 X11.XFlush.argtypes = [ctypes.c_void_p]
+X11.XGetImage.argtypes = [
+    ctypes.c_void_p, ctypes.c_ulong, ctypes.c_int, ctypes.c_int,
+    ctypes.c_uint, ctypes.c_uint, ctypes.c_ulong, ctypes.c_int,
+]
+X11.XGetImage.restype = ctypes.POINTER(XImage)
+X11.XDestroyImage.argtypes = [ctypes.POINTER(XImage)]
+X11.XDestroyImage.restype = ctypes.c_int
 
 SPECIAL = {
     "Enter": 0xff0d, "Backspace": 0xff08, "Tab": 0xff09, "Escape": 0xff1b,
@@ -95,35 +122,106 @@ def type_ascii(d, text):
         if shifted:
             XTST.XTestFakeKeyEvent(d, shift_code, 0, 0)
 
+def _capture_jpeg_screenshot_fallback(max_width, quality):
+    with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as f:
+        path = f.name
+    try:
+        subprocess.run(
+            ["/usr/bin/xfce4-screenshooter", "-f", "-s", path],
+            env=ENV,
+            check=True,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.PIPE,
+            timeout=8,
+        )
+        with Image.open(path) as im:
+            im = im.convert("RGB")
+            source_w, source_h = im.size
+            if im.width > max_width:
+                ratio = max_width / im.width
+                im = im.resize(
+                    (max_width, max(1, int(im.height * ratio))),
+                    Image.Resampling.BILINEAR,
+                )
+            out = io.BytesIO()
+            im.save(out, format="JPEG", quality=quality, optimize=True)
+            return out.getvalue(), source_w, source_h
+    finally:
+        try:
+            Path(path).unlink()
+        except OSError:
+            pass
+
+
+def _capture_jpeg_x11(max_width, quality):
+    d = open_display()
+    image_ptr = None
+    try:
+        root = X11.XDefaultRootWindow(d)
+        source_w, source_h = display_size(d)
+        image_ptr = X11.XGetImage(
+            d,
+            root,
+            0,
+            0,
+            source_w,
+            source_h,
+            ctypes.c_ulong(-1).value,
+            2,  # ZPixmap
+        )
+        if not image_ptr:
+            raise RuntimeError("XGetImage returned no framebuffer")
+
+        image = image_ptr.contents
+        standard_bgrx = (
+            image.bits_per_pixel == 32
+            and image.byte_order == 0
+            and image.red_mask == 0xFF0000
+            and image.green_mask == 0x00FF00
+            and image.blue_mask == 0x0000FF
+        )
+        if not standard_bgrx:
+            raise RuntimeError(
+                "Unsupported X11 framebuffer "
+                f"bpp={image.bits_per_pixel} byte_order={image.byte_order} "
+                f"masks={image.red_mask:#x}/{image.green_mask:#x}/{image.blue_mask:#x}"
+            )
+
+        byte_count = image.bytes_per_line * source_h
+        raw = ctypes.string_at(image.data, byte_count)
+        im = Image.frombuffer(
+            "RGB",
+            (source_w, source_h),
+            raw,
+            "raw",
+            "BGRX",
+            image.bytes_per_line,
+            1,
+        )
+        if source_w > max_width:
+            ratio = max_width / source_w
+            im = im.resize(
+                (max_width, max(1, int(source_h * ratio))),
+                Image.Resampling.BILINEAR,
+            )
+
+        out = io.BytesIO()
+        im.save(out, format="JPEG", quality=quality, optimize=True)
+        return out.getvalue(), source_w, source_h
+    finally:
+        if image_ptr:
+            X11.XDestroyImage(image_ptr)
+        X11.XCloseDisplay(d)
+
+
 def capture_jpeg(max_width=None, quality=None):
     max_width = max(480, min(1440, int(max_width or os.environ.get("CODEPILOT_DESKTOP_MAX_WIDTH", "1280"))))
     quality = max(30, min(82, int(quality or os.environ.get("CODEPILOT_DESKTOP_JPEG_QUALITY", "58"))))
     with capture_lock:
-        with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as f:
-            path = f.name
         try:
-            subprocess.run(
-                ["/usr/bin/xfce4-screenshooter", "-f", "-s", path],
-                env=ENV,
-                check=True,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.PIPE,
-                timeout=8,
-            )
-            with Image.open(path) as im:
-                im = im.convert("RGB")
-                source_w, source_h = im.size
-                if im.width > max_width:
-                    ratio = max_width / im.width
-                    im = im.resize((max_width, max(1, int(im.height * ratio))))
-                out = io.BytesIO()
-                im.save(out, format="JPEG", quality=quality, optimize=True)
-                return out.getvalue(), source_w, source_h
-        finally:
-            try:
-                Path(path).unlink()
-            except OSError:
-                pass
+            return _capture_jpeg_x11(max_width, quality)
+        except Exception:
+            return _capture_jpeg_screenshot_fallback(max_width, quality)
 
 def handle_input(data):
     kind = str(data.get("type", ""))
