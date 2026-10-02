@@ -883,11 +883,11 @@ function markRemoteInteraction(){
 
 function remoteFrameProfile(){
   const active=Date.now()-remoteLastInteraction<1800;
-  if(remoteQualityMode==="low")return {quality:38,maxWidth:820,delay:1200,turboDelay:650,label:"Low"};
-  if(remoteQualityMode==="high")return {quality:72,maxWidth:1440,delay:1050,turboDelay:450,label:"High"};
+  if(remoteQualityMode==="low")return {quality:38,maxWidth:820,delay:900,turboDelay:650,label:"Low"};
+  if(remoteQualityMode==="high")return {quality:72,maxWidth:1440,delay:700,turboDelay:450,label:"High"};
   return active
-    ?{quality:42,maxWidth:960,delay:650,turboDelay:250,label:"Auto · responsive"}
-    :{quality:62,maxWidth:1280,delay:1000,turboDelay:450,label:"Auto · sharp"};
+    ?{quality:42,maxWidth:960,delay:350,turboDelay:250,label:"Auto · responsive"}
+    :{quality:62,maxWidth:1280,delay:700,turboDelay:450,label:"Auto · sharp"};
 }
 
 function remoteWebSocketUrl(){
