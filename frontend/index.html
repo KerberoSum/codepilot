@@ -163,6 +163,14 @@ body.auth-locked #authModal{display:grid!important;background:var(--bg)}
 .agent-stat-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:4px;margin-bottom:8px}.agent-stat{border:1px solid var(--border);background:var(--panel2);border-radius:7px;padding:5px 6px}.agent-stat span{display:block;color:var(--muted);font-size:7px;margin-bottom:2px}.agent-stat b{font-size:9px;color:#fff}
 .agent-history-list{max-height:42vh;overflow:auto;border:1px solid var(--border);border-radius:8px}.agent-history-list .storage-item{grid-template-columns:minmax(0,1fr) auto}
 .agent-secondary{border:1px solid var(--border);background:var(--panel3);color:var(--muted);border-radius:7px;padding:7px 9px;font-size:9px}.agent-secondary:hover{color:#fff;background:var(--border)}
+.brain-center{position:fixed;z-index:94;right:16px;top:70px;width:min(680px,calc(100vw - 24px));max-height:78vh;overflow:hidden;border:1px solid var(--border);border-radius:12px;background:rgba(9,13,19,.98);box-shadow:0 24px 80px rgba(0,0,0,.52);backdrop-filter:blur(12px)}
+.brain-center-head{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:11px 12px;border-bottom:1px solid var(--border);background:var(--panel)}.brain-center-head strong{font-size:11px}.brain-center-head span{display:block;color:var(--muted);font-size:8px;margin-top:2px}.brain-center-actions{display:flex;gap:6px}
+.brain-center-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:7px;padding:10px;overflow:auto;max-height:calc(78vh - 55px)}
+.brain-card{border:1px solid var(--border);background:var(--panel2);border-radius:10px;padding:9px;min-width:0}.brain-card.ready{border-color:rgba(76,210,153,.26)}.brain-card.warn{border-color:rgba(255,196,79,.28)}.brain-card.offline{opacity:.78}
+.brain-card-top{display:flex;align-items:flex-start;gap:7px}.brain-card-dot{width:8px;height:8px;border-radius:50%;margin-top:4px;background:var(--muted2);box-shadow:0 0 0 3px rgba(255,255,255,.03)}.brain-card.ready .brain-card-dot{background:var(--green)}.brain-card.warn .brain-card-dot{background:var(--yellow)}.brain-card.offline .brain-card-dot{background:var(--red)}
+.brain-card-title{min-width:0;flex:1}.brain-card-title strong{display:block;font-size:10px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.brain-card-status{font-size:8px;color:var(--muted)}.brain-card.ready .brain-card-status{color:var(--green)}.brain-card.warn .brain-card-status{color:var(--yellow)}.brain-card.offline .brain-card-status{color:var(--red)}
+.brain-card-meta{display:grid;grid-template-columns:auto minmax(0,1fr);gap:3px 7px;margin-top:8px;font-size:8px}.brain-card-meta span{color:var(--muted)}.brain-card-meta b{font-weight:600;color:#dbe5f2;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.brain-card-detail{min-height:30px;margin-top:7px;padding-top:7px;border-top:1px solid var(--border2);font-size:8px;line-height:1.45;color:var(--muted)}.brain-card-buttons{display:flex;gap:5px;margin-top:8px}.brain-card-buttons button{flex:1}.brain-card-test-result{margin-top:5px;font-size:7px;color:var(--muted)}.brain-card-test-result.ok{color:var(--green)}.brain-card-test-result.fail{color:var(--red)}
 .agent-session-controls{display:flex;align-items:center;gap:5px;min-width:0}.agent-session-controls .chat-select{max-width:190px}
 .agent-chat-session-head{display:flex;align-items:center;justify-content:space-between;gap:6px;margin-bottom:5px}.agent-chat-session-head .agent-side-title{margin:0}.agent-chat-new{padding:4px 7px;font-size:8px}
 .agent-project-row{display:flex;gap:4px;align-items:center;margin-bottom:8px}.agent-project-select{min-width:0;flex:1;border:1px solid var(--border);background:var(--panel2);color:#fff;border-radius:7px;padding:7px 8px;font-size:9px}.agent-project-actions{display:flex;gap:2px}.agent-project-actions .icon-btn{border:1px solid var(--border);background:var(--panel2);padding:5px 6px;font-size:9px}
@@ -174,6 +182,7 @@ body.auth-locked #authModal{display:grid!important;background:var(--bg)}
 .agent-chat-row-meta{display:flex;align-items:center;gap:5px;color:var(--muted);font-size:7px;min-width:0}.agent-brain-badge{border:1px solid var(--border);border-radius:999px;padding:2px 5px;color:#d9e0e9;background:var(--panel3);white-space:nowrap}.agent-chat-last-read{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .agent-compact-strip{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:4px;margin-bottom:8px}.agent-compact-stat{border:1px solid var(--border);background:var(--panel2);border-radius:7px;padding:5px 6px;min-width:0}.agent-compact-stat span{display:block;font-size:7px;color:var(--muted);margin-bottom:1px}.agent-compact-stat b{display:block;font-size:9px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .agent-system{border:1px solid var(--border);border-radius:8px;background:var(--panel2);margin:auto 0 0;overflow:hidden;flex:0 0 auto;position:relative;z-index:2;box-shadow:0 -8px 20px rgba(0,0,0,.14)}.agent-system-head{display:flex;align-items:center;justify-content:space-between;gap:6px;padding:5px 6px;border-bottom:1px solid var(--border2)}.agent-system-head strong{font-size:8px;letter-spacing:.75px;color:var(--muted)}.agent-system-actions{display:flex;gap:4px}.agent-system-btn{border:1px solid var(--border);background:var(--panel3);color:var(--muted);border-radius:5px;padding:3px 5px;font-size:7px}.agent-system-btn:hover{color:#fff}.agent-system-metrics{display:flex;flex-wrap:wrap;gap:4px;padding:5px}.agent-system-chip{display:flex;align-items:center;gap:4px;min-width:0;border:1px solid var(--border2);background:#0d131d;border-radius:6px;padding:3px 5px}.agent-system-chip span{font-size:7px;color:var(--muted);white-space:nowrap}.agent-system-chip b{font-size:8px;color:#fff;white-space:nowrap;max-width:90px;overflow:hidden;text-overflow:ellipsis}.agent-system-chip b.ready{color:var(--green)}.agent-system-chip b.warn{color:var(--yellow)}.agent-system-chip b.offline{color:var(--red)}.agent-system-settings{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:3px;padding:6px;border-top:1px solid var(--border2);background:var(--panel)}.agent-system-settings label{display:flex;align-items:center;gap:4px;font-size:7px;color:var(--muted);white-space:nowrap}.agent-system-settings input{accent-color:var(--accent)}
+@media(max-width:760px){.brain-center{right:8px;top:64px;width:calc(100vw - 16px);max-height:82vh}.brain-center-grid{grid-template-columns:1fr;max-height:calc(82vh - 58px)}.brain-center-head{align-items:flex-start}.brain-center-head span{max-width:220px}}
 
 .remote-page{position:fixed;inset:0;z-index:73;display:flex;flex-direction:column;background:#05070a;color:#e6edf3}
 .remote-body{flex:1;min-height:0;display:flex;flex-direction:column;background:#05070a}
@@ -519,6 +528,7 @@ body.auth-locked #authModal{display:grid!important;background:var(--bg)}
             <option value="grok">Grok</option>
             <option value="gemini">Gemini</option>
           </select>
+          <button class="agent-secondary" onclick="toggleBrainCenter()" title="Open Brain Control Center">Brains</button>
           <label class="agent-toggle" title="Allow this chat and its queued commands to browse public websites">
             <input id="vmAgentWeb" type="checkbox" checked>
             Web access
@@ -527,6 +537,17 @@ body.auth-locked #authModal{display:grid!important;background:var(--bg)}
           <button class="agent-page-tab" onclick="checkVmAgent(true)">Check</button>
         </div>
       </div>
+
+      <section id="brainCenter" class="brain-center hidden" aria-label="Brain Control Center">
+        <div class="brain-center-head">
+          <div><strong>Brain Control Center</strong><span>Live readiness, real backend, usage pool, auth state, and credit-safe probes.</span></div>
+          <div class="brain-center-actions">
+            <button id="brainTestAllButton" class="agent-secondary" onclick="testAllBrains()">Test all</button>
+            <button class="icon-btn" onclick="toggleBrainCenter(false)" title="Close Brain Control Center">×</button>
+          </div>
+        </div>
+        <div id="brainCenterGrid" class="brain-center-grid"></div>
+      </section>
 
       <div class="agent-transcript">
         <div class="agent-welcome"><strong>Your VM is your CodePilot workspace.</strong>Choose a project or Random Chats, choose a brain, then chat normally. Read only inspects; Edit files can change files inside <code>/srv/codepilot-workspace</code>.</div>
@@ -698,6 +719,7 @@ let vmMissionTimer=null;
 let vmStatusTimer=null;
 let vmActivePage="agent";
 let vmChats=[], currentVmChat=null, vmAgentMessages=[], vmRemoteBusy=false, vmProjectId="";
+let vmCapabilitiesCache=null;
 let terminalCwd="/srv/codepilot-workspace", terminalHistory=[], terminalHistoryIndex=0;
 let remoteScreenTimer=null, remoteScreenBusy=false, remoteScreenObjectUrl="", remotePointerActive=false, remoteMoveTimer=null, remotePendingMove=null;
 const ATTACH_MAX_FILES=5;
@@ -705,6 +727,8 @@ const ATTACH_MAX_FILE_BYTES=500*1024;
 const ATTACH_MAX_TOTAL_BYTES=1024*1024;
 const ATTACH_ALLOWED_EXT=new Set(["html","htm","css","js","mjs","cjs","ts","jsx","tsx","json","md","txt","py","sql","xml","yaml","yml","csv"]);
 const VM_SYSTEM_PREFS_KEY="codepilot-vm-system-prefs-v1";
+const VM_BRAIN_TESTS_KEY="codepilot-vm-brain-tests-v1";
+const VM_BRAIN_ORDER=["chatgpt_desktop","chatgpt","codex","cursor","openrouter","grok","gemini"];
 const VM_SYSTEM_METRICS=["agent","browser","cpu","ram","disk","queue","duration","tokens","model","cost"];
 const VM_SYSTEM_DEFAULT_METRICS=["agent","browser","cpu","ram","disk","queue"];
 
@@ -1198,6 +1222,142 @@ async function loadVmChats(openRecent=false){
 
 function vmBrainLabel(provider){
   return ({chatgpt_desktop:"ChatGPT Chat",chatgpt:"Goose · Codex",openrouter:"Goose · OpenRouter",gemini:"Gemini",codex:"Codex CLI",grok:"Grok",cursor:"Cursor"})[provider]||provider||"AI";
+}
+
+function readBrainTests(){
+  try{return JSON.parse(localStorage.getItem(VM_BRAIN_TESTS_KEY)||"{}")||{}}catch{return {}}
+}
+
+function writeBrainTests(value){
+  try{localStorage.setItem(VM_BRAIN_TESTS_KEY,JSON.stringify(value||{}))}catch{}
+}
+
+function brainTime(value){
+  if(!value)return "Never";
+  const ts=Date.parse(value);if(!Number.isFinite(ts))return "Never";
+  const delta=Math.max(0,Date.now()-ts),min=Math.floor(delta/60000);
+  if(min<1)return "Just now";
+  if(min<60)return min+"m ago";
+  const hr=Math.floor(min/60);if(hr<24)return hr+"h ago";
+  try{return new Date(ts).toLocaleString()}catch{return value}
+}
+
+function brainState(info){
+  if(info?.available)return {cls:"ready",label:"Ready"};
+  if(info?.needs_auth)return {cls:"warn",label:"Sign in needed"};
+  return {cls:"offline",label:"Unavailable"};
+}
+
+function renderBrainCenter(){
+  const grid=document.getElementById("brainCenterGrid");if(!grid)return;
+  const providers=vmCapabilitiesCache?.providers||{};
+  const tests=readBrainTests();
+  grid.innerHTML="";
+  VM_BRAIN_ORDER.forEach(provider=>{
+    const info=providers[provider]||{};
+    const state=brainState(info);
+    const test=tests[provider]||{};
+    const card=document.createElement("article");card.className="brain-card "+state.cls;
+
+    const top=document.createElement("div");top.className="brain-card-top";
+    const dot=document.createElement("span");dot.className="brain-card-dot";
+    const title=document.createElement("div");title.className="brain-card-title";
+    const name=document.createElement("strong");name.textContent=info.label||vmBrainLabel(provider);
+    const status=document.createElement("span");status.className="brain-card-status";status.textContent=state.label;
+    title.append(name,status);top.append(dot,title);
+
+    const meta=document.createElement("div");meta.className="brain-card-meta";
+    const add=(label,value)=>{const a=document.createElement("span");a.textContent=label;const b=document.createElement("b");b.textContent=value||"—";meta.append(a,b);};
+    add("Runner",info.runner||"—");
+    add("Auth",info.auth_mode|| (info.needs_auth?"Required":"—"));
+    add("Usage",info.usage_pool||"—");
+    add("Last OK",test.successAt?brainTime(test.successAt):"Never");
+
+    const detail=document.createElement("div");detail.className="brain-card-detail";
+    detail.textContent=test.detail||info.reason||(info.available?"Ready on the VM.":info.needs_auth?"Authentication is required.":"Not ready.");
+
+    const buttons=document.createElement("div");buttons.className="brain-card-buttons";
+    const use=document.createElement("button");use.className="agent-secondary";use.textContent=vmAgentProvider()===provider?"Selected":"Use";use.disabled=!info.available||vmAgentProvider()===provider;
+    use.onclick=()=>selectBrainFromCenter(provider);
+    const testBtn=document.createElement("button");testBtn.className="agent-secondary";testBtn.textContent="Test";testBtn.dataset.providerTest=provider;
+    testBtn.onclick=()=>testVmBrain(provider,testBtn);
+    buttons.append(use,testBtn);
+
+    const result=document.createElement("div");result.className="brain-card-test-result"+(test.lastOk===true?" ok":test.lastOk===false?" fail":"");
+    if(test.lastAt){
+      result.textContent=(test.lastOk?"✓ ":"✕ ")+brainTime(test.lastAt)+(test.version?" · "+test.version:"");
+    }else{
+      result.textContent=info.test_is_free===false?"Test may use provider quota":"Credit-safe readiness test";
+    }
+
+    card.append(top,meta,detail,buttons,result);grid.appendChild(card);
+  });
+}
+
+function toggleBrainCenter(force){
+  const panel=document.getElementById("brainCenter");if(!panel)return;
+  const open=typeof force==="boolean"?force:panel.classList.contains("hidden");
+  panel.classList.toggle("hidden",!open);
+  if(open){
+    renderBrainCenter();
+    loadVmCapabilities().catch(()=>{});
+  }
+}
+
+function selectBrainFromCenter(provider){
+  const select=document.getElementById("vmAgentProvider");if(!select)return;
+  const option=[...select.options].find(o=>o.value===provider);
+  if(!option||option.disabled)return;
+  select.value=provider;vmAgentProviderChanged();renderBrainCenter();
+}
+
+async function testVmBrain(provider,button){
+  const tests=readBrainTests();
+  if(button){button.disabled=true;button.textContent="Testing…";}
+  try{
+    const d=await api("/vm-agent/providers/"+encodeURIComponent(provider)+"/test",{
+      method:"POST",
+      signal:AbortSignal.timeout(15000)
+    });
+    const ok=d.ok===true;
+    tests[provider]={
+      ...(tests[provider]||{}),
+      lastAt:d.tested_at||new Date().toISOString(),
+      lastOk:ok,
+      successAt:ok?(d.tested_at||new Date().toISOString()):(tests[provider]?.successAt||""),
+      detail:d.detail||"",
+      version:d.version||""
+    };
+    writeBrainTests(tests);
+    if(d.capability&&vmCapabilitiesCache?.providers)vmCapabilitiesCache.providers[provider]=d.capability;
+    renderBrainCenter();
+    return ok;
+  }catch(e){
+    tests[provider]={
+      ...(tests[provider]||{}),
+      lastAt:new Date().toISOString(),
+      lastOk:false,
+      successAt:tests[provider]?.successAt||"",
+      detail:e.message||String(e),
+      version:""
+    };
+    writeBrainTests(tests);renderBrainCenter();return false;
+  }finally{
+    if(button){button.disabled=false;button.textContent="Test";}
+  }
+}
+
+async function testAllBrains(){
+  const btn=document.getElementById("brainTestAllButton");if(btn){btn.disabled=true;btn.textContent="Testing…";}
+  try{
+    for(const provider of VM_BRAIN_ORDER){
+      const cardBtn=document.querySelector('[data-provider-test="'+provider+'"]');
+      await testVmBrain(provider,cardBtn);
+    }
+    await loadVmCapabilities();
+  }finally{
+    if(btn){btn.disabled=false;btn.textContent="Test all";}
+  }
 }
 
 function vmChatRelativeTime(value){
@@ -1784,6 +1944,8 @@ async function loadVmCapabilities(){
   const worker=document.getElementById("remoteWorkerCapability"),browser=document.getElementById("browserCapability");
   try{
     const d=await api("/vm-agent/capabilities",{signal:AbortSignal.timeout(12000)});
+    vmCapabilitiesCache=d;
+    if(!document.getElementById("brainCenter")?.classList.contains("hidden"))renderBrainCenter();
     if(worker){worker.textContent=d.remote_worker?"Ready":"Unavailable";worker.className=d.remote_worker?"ready":"offline";}
     const providerSelect=document.getElementById("vmAgentProvider"),providers=d.providers||{};
     if(providerSelect){
