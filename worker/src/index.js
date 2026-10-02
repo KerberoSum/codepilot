@@ -548,6 +548,132 @@ export default {
         });
       }
 
+      if (path === "/vm-desktop/ws" && request.method === "GET") {
+        const upgrade = String(request.headers.get("Upgrade") || "").toLowerCase();
+        if (upgrade !== "websocket") {
+          return json({ success: false, error: "WebSocket upgrade required." }, 426);
+        }
+        if (requestOrigin && !corsOrigin) {
+          return json({ success: false, error: "Origin not allowed." }, 403);
+        }
+
+        const protocols = String(request.headers.get("Sec-WebSocket-Protocol") || "")
+          .split(",").map(value => value.trim()).filter(Boolean);
+        const sessionToken = protocols.find(value => value !== "codepilot") || "";
+        if (!(await verifySessionToken(sessionToken))) {
+          return json({ success: false, error: "Authentication required." }, 401);
+        }
+        if (!env.VM_AGENT_SECRET) {
+          return json({ success: false, error: "VM Agent secret is not configured." }, 503);
+        }
+        const vmBase = await getVmAgentBase();
+        if (!vmBase) {
+          return json({ success: false, error: "VM Agent URL is not configured or registered." }, 503);
+        }
+
+        const pair = new WebSocketPair();
+        const sockets = Object.values(pair);
+        const client = sockets[0];
+        const server = sockets[1];
+        let frameBusy = false;
+        let socketClosed = false;
+
+        server.accept();
+
+        const sendJson = payload => {
+          if (socketClosed || server.readyState !== 1) return;
+          try { server.send(JSON.stringify(payload)); } catch {}
+        };
+
+        server.addEventListener("message", async event => {
+          if (socketClosed || typeof event.data !== "string") return;
+          if (event.data.length > 65536) {
+            try { server.close(1009, "Message too large"); } catch {}
+            return;
+          }
+
+          let message = {};
+          try { message = JSON.parse(event.data); }
+          catch {
+            sendJson({ type: "error", error: "Invalid Turbo message." });
+            return;
+          }
+
+          if (message.type === "frame") {
+            if (frameBusy) return;
+            frameBusy = true;
+            const started = Date.now();
+            try {
+              const quality = Math.max(30, Math.min(82, Number(message.quality) || 58));
+              const maxWidth = Math.max(480, Math.min(1440, Number(message.max_width) || 1280));
+              const upstream = await fetch(
+                vmBase + "/desktop/frame?quality=" + Math.round(quality) + "&max_width=" + Math.round(maxWidth),
+                {
+                  method: "GET",
+                  headers: { "Authorization": "Bearer " + String(env.VM_AGENT_SECRET).trim() },
+                  signal: AbortSignal.timeout(15000)
+                }
+              );
+              if (!upstream.ok) {
+                let detail = "";
+                try {
+                  const data = await upstream.json();
+                  detail = data?.detail || data?.error || "";
+                } catch {}
+                throw new Error(detail || ("VM desktop HTTP " + upstream.status));
+              }
+              const frame = await upstream.arrayBuffer();
+              sendJson({
+                type: "frame_meta",
+                elapsed_ms: Date.now() - started,
+                bytes: frame.byteLength,
+                width: Number(upstream.headers.get("x-codepilot-width") || 0) || undefined,
+                height: Number(upstream.headers.get("x-codepilot-height") || 0) || undefined
+              });
+              if (!socketClosed && server.readyState === 1) server.send(frame);
+            } catch (error) {
+              sendJson({ type: "error", error: error?.message || "Turbo frame failed." });
+            } finally {
+              frameBusy = false;
+            }
+            return;
+          }
+
+          if (message.type === "input") {
+            const payload = message.payload;
+            if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
+              sendJson({ type: "error", error: "Invalid Turbo input payload." });
+              return;
+            }
+            try {
+              const result = await callVmAgentJson("/desktop/input", {
+                method: "POST",
+                body: payload,
+                timeout: 10000
+              });
+              sendJson({ type: "input_ack", ok: result?.ok !== false });
+            } catch (error) {
+              sendJson({ type: "error", error: error?.message || "Turbo input failed." });
+            }
+            return;
+          }
+
+          if (message.type === "ping") {
+            sendJson({ type: "pong", ts: Date.now() });
+          }
+        });
+
+        server.addEventListener("close", () => { socketClosed = true; });
+        server.addEventListener("error", () => { socketClosed = true; });
+        sendJson({ type: "ready", transport: "websocket-turbo" });
+
+        return new Response(null, {
+          status: 101,
+          webSocket: client,
+          headers: { "Sec-WebSocket-Protocol": "codepilot" }
+        });
+      }
+
       if (path === "/vm-desktop/frame" && request.method === "GET") {
         if (!(await requestIsAuthenticated())) {
           return json({ success: false, error: "Authentication required." }, 401);
