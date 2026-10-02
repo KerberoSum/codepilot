@@ -296,6 +296,9 @@ def provider_capabilities() -> dict:
             "default": False,
             "persistent": False,
             "runner": "ChatGPT Desktop",
+            "auth_mode": "Desktop session",
+            "usage_pool": "ChatGPT Chat",
+            "test_is_free": True,
             "chat_only": True,
             "reason": None if desktop_ready else "Open or restart ChatGPT Desktop on the VM so the localhost bridge can attach.",
         },
@@ -305,7 +308,9 @@ def provider_capabilities() -> dict:
             "default": True,
             "persistent": False,
             "runner": "Goose",
+            "auth_mode": "ChatGPT OAuth",
             "usage_pool": "ChatGPT Codex",
+            "test_is_free": True,
             "needs_auth": not oauth_ready("chatgpt_codex"),
         },
         "openrouter": {
@@ -314,7 +319,9 @@ def provider_capabilities() -> dict:
             "default": False,
             "persistent": False,
             "runner": "Goose",
+            "auth_mode": "API key",
             "usage_pool": "OpenRouter",
+            "test_is_free": True,
             "needs_auth": not goose_secret_ready("OPENROUTER_API_KEY"),
         },
         "gemini": {
@@ -323,11 +330,93 @@ def provider_capabilities() -> dict:
             "default": False,
             "persistent": False,
             "runner": "Goose",
+            "auth_mode": "Google OAuth",
+            "usage_pool": "Gemini",
+            "test_is_free": True,
             "needs_auth": not oauth_ready("gemini_oauth"),
         },
-        "codex": {"label": "Codex CLI · credits", "available": bool(command_path(CODEX_BIN)), "default": False, "persistent": True, "usage_pool": "Codex"},
-        "grok": {"label": "Grok", "available": bool(command_path(GROK_BIN)), "default": False, "persistent": True},
-        "cursor": {"label": "Cursor Agent", "available": cursor_auth_ready(), "default": False, "persistent": True, "needs_auth": not cursor_auth_ready()},
+        "codex": {"label": "Codex CLI · credits", "available": bool(command_path(CODEX_BIN)), "default": False, "persistent": True, "runner": "Codex CLI", "auth_mode": "Codex login", "usage_pool": "Codex credits", "test_is_free": True},
+        "grok": {"label": "Grok", "available": bool(command_path(GROK_BIN)), "default": False, "persistent": True, "runner": "Grok CLI", "auth_mode": "CLI session", "usage_pool": "Grok", "test_is_free": True},
+        "cursor": {"label": "Cursor Agent", "available": cursor_auth_ready(), "default": False, "persistent": True, "runner": "Cursor Agent", "auth_mode": "Cursor login", "usage_pool": "Cursor", "test_is_free": True, "needs_auth": not cursor_auth_ready()},
+    }
+
+
+def provider_probe(provider: str) -> dict:
+    providers = provider_capabilities()
+    info = providers.get(provider)
+    if not info:
+        return {
+            "ok": False,
+            "provider": provider,
+            "tested_at": now_iso(),
+            "detail": "Unknown provider.",
+        }
+
+    available = bool(info.get("available"))
+    detail = info.get("reason") or ""
+    version = None
+
+    try:
+        if provider == "chatgpt_desktop":
+            detail = "ChatGPT Desktop bridge target is live." if available else (detail or "ChatGPT Desktop bridge is unavailable.")
+        elif provider in {"chatgpt", "openrouter", "gemini"}:
+            goose = command_path(GOOSE_BIN)
+            if goose:
+                result = subprocess.run([goose, "--version"], capture_output=True, text=True, timeout=4, check=False)
+                version = (result.stdout or result.stderr).strip().splitlines()[0] if (result.stdout or result.stderr).strip() else None
+            if available:
+                detail = {
+                    "chatgpt": "Goose is installed and the ChatGPT Codex OAuth cache is present.",
+                    "openrouter": "Goose is installed and the OpenRouter API key is present.",
+                    "gemini": "Goose is installed and the Gemini OAuth cache is present.",
+                }[provider]
+            elif info.get("needs_auth"):
+                detail = "Authentication is required."
+            else:
+                detail = "Goose or provider configuration is unavailable."
+        elif provider == "cursor":
+            cursor = command_path(CURSOR_BIN)
+            if cursor:
+                result = subprocess.run(
+                    [cursor, "status"],
+                    capture_output=True,
+                    text=True,
+                    timeout=5,
+                    check=False,
+                    env={**os.environ, "HOME": str(Path.home())},
+                )
+                output = (result.stdout + "\n" + result.stderr).strip()
+                detail = output.splitlines()[0] if output else ("Cursor login is ready." if available else "Cursor authentication is unavailable.")
+            else:
+                detail = "Cursor Agent is not installed."
+        elif provider == "codex":
+            codex = command_path(CODEX_BIN)
+            if codex:
+                result = subprocess.run([codex, "--version"], capture_output=True, text=True, timeout=5, check=False)
+                version = (result.stdout or result.stderr).strip().splitlines()[0] if (result.stdout or result.stderr).strip() else None
+                detail = "Codex CLI is installed. This probe does not consume Codex credits."
+            else:
+                detail = "Codex CLI is not installed."
+        elif provider == "grok":
+            grok = command_path(GROK_BIN)
+            if grok:
+                result = subprocess.run([grok, "--version"], capture_output=True, text=True, timeout=5, check=False)
+                version = (result.stdout or result.stderr).strip().splitlines()[0] if (result.stdout or result.stderr).strip() else None
+                detail = "Grok CLI is installed. This probe does not send a model request."
+            else:
+                detail = "Grok CLI is not installed."
+    except Exception as exc:
+        available = False
+        detail = f"Probe failed: {exc}"
+
+    return {
+        "ok": available,
+        "provider": provider,
+        "tested_at": now_iso(),
+        "detail": detail,
+        "version": version,
+        "capability": info,
+        "credit_safe": True,
     }
 
 
@@ -1037,6 +1126,13 @@ async def capabilities(authorization: Optional[str] = Header(default=None)):
             "concurrency": 1,
         },
     }
+
+
+@app.post("/agent/providers/{provider}/test")
+async def test_provider(provider: str, authorization: Optional[str] = Header(default=None)):
+    require_auth(authorization)
+    result = await asyncio.to_thread(provider_probe, provider)
+    return result
 
 
 @app.get("/desktop/frame")
