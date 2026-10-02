@@ -1,4 +1,4 @@
-# CodePilot Remote Worker v3.1
+# CodePilot Remote Worker v3.5
 
 CodePilot's VM Agent can now operate as a small remote worker rather than only a one-shot task runner.
 
@@ -58,7 +58,30 @@ sudo bash vm-agent/upgrade-v3.sh
 
 It installs the v3 server/unit, refreshes the Quick Tunnel helper, installs browser tooling, restarts the services, and prints a local health check. Use `--skip-browser` only if you intentionally do not want Trailblaze installed.
 
-The health response should report version 3.1.
+The health response should report version 3.5.
+
+## Safety Net checkpoints
+
+Install the recovery layer once:
+
+```bash
+sudo bash vm-agent/install-checkpoint.sh
+```
+
+The Safety Net stores root-only checkpoints under `/var/lib/codepilot-checkpoints`. It creates a rolling checkpoint every 12 hours and keeps the newest 12 snapshots. Agent reloads create an additional pre-change checkpoint automatically; if a reload fails its post-restart health checks, the reload script automatically restores that checkpoint.
+
+Snapshots contain CodePilot source plus the service/desktop definitions needed to recover a deployment. Browser profiles, Downloads, environment secret files, OAuth/token files, Goose secrets, Grok/Cursor auth, and ChatGPT/Codex auth are excluded.
+
+Useful commands:
+
+```bash
+sudo codepilot-checkpoint list
+sudo codepilot-checkpoint show <checkpoint-id>
+sudo codepilot-checkpoint health
+sudo codepilot-checkpoint restore <checkpoint-id> --yes
+```
+
+A manual restore first creates a pre-rollback safety checkpoint. After restore it verifies the agent, desktop relay, Worker tunnel, watchdog, and X11 display. If that verification fails, it automatically attempts to restore the pre-rollback state.
 
 ## Worker endpoints
 

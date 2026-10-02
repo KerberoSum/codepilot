@@ -7,6 +7,10 @@ if [ "$(id -u)" -ne 0 ]; then
 fi
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+if [ -x /usr/local/sbin/codepilot-checkpoint ]; then
+  checkpoint_id="$(/usr/local/sbin/codepilot-checkpoint create pre-watchdog-install --id-only 2>/dev/null || true)"
+  [ -n "$checkpoint_id" ] && echo "Safety checkpoint: $checkpoint_id"
+fi
 install -m 0755 "$SCRIPT_DIR/codepilot-watchdog.sh" /usr/local/sbin/codepilot-watchdog
 
 cat >/etc/systemd/system/codepilot-watchdog.service <<'UNIT'

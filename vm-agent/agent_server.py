@@ -1183,6 +1183,11 @@ async def startup():
     asyncio.create_task(mission_worker())
 
 
+@app.get("/healthz")
+async def healthz():
+    return {"ok": True, "version": 3.5}
+
+
 @app.get("/health")
 async def health():
     browser = browser_capability()

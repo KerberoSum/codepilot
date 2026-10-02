@@ -13,6 +13,11 @@ log_event() {
   mv "$EVENT_FILE.tmp" "$EVENT_FILE" 2>/dev/null || true
 }
 
+agent_health(){
+  curl -fsS --connect-timeout 1 --max-time 3 http://127.0.0.1:8765/healthz >/dev/null 2>&1 \
+    || curl -fsS --connect-timeout 2 --max-time 6 http://127.0.0.1:8765/health >/dev/null 2>&1
+}
+
 repairs=()
 agent_ok=false
 display_ok=false
@@ -21,13 +26,13 @@ tunnel_ok=false
 chatgpt_ok=false
 disk_ok=true
 
-if curl -fsS --connect-timeout 2 --max-time 5 http://127.0.0.1:8765/health >/dev/null 2>&1; then
+if agent_health; then
   agent_ok=true
 else
   log_event "agent health failed; restarting codepilot-agent.service"
   if systemctl restart codepilot-agent.service >/dev/null 2>&1; then
     sleep 3
-    if curl -fsS --connect-timeout 2 --max-time 5 http://127.0.0.1:8765/health >/dev/null 2>&1; then
+    if agent_health; then
       agent_ok=true
       repairs+=("agent restarted")
     fi
@@ -60,7 +65,7 @@ if $display_ok; then
       sleep 2
       if curl -fsS --connect-timeout 2 --max-time 5 http://127.0.0.1:8770/health >/dev/null 2>&1; then
         relay_ok=true
-        repairsk=("desktop relay restarted")
+        repairs+=("desktop relay restarted")
       fi
     fi
   fi

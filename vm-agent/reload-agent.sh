@@ -10,6 +10,12 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 AGENT_DIR="/srv/codepilot-agent"
 GOOSE_CFG="$AGENT_DIR/.config/goose"
 
+checkpoint_id=""
+if [ -x /usr/local/sbin/codepilot-checkpoint ]; then
+  checkpoint_id="$(/usr/local/sbin/codepilot-checkpoint create pre-agent-reload --id-only 2>/dev/null || true)"
+  [ -n "$checkpoint_id" ] && echo "Safety checkpoint: $checkpoint_id"
+fi
+
 install -m 0644 "$SCRIPT_DIR/agent_server.py" "$AGENT_DIR/agent_server.py"
 install -m 0644 "$SCRIPT_DIR/chatgpt_desktop_bridge.py" "$AGENT_DIR/chatgpt_desktop_bridge.py"
 install -m 0644 "$SCRIPT_DIR/desktop_relay.py" /usr/local/lib/codepilot-desktop-relay.py
@@ -68,13 +74,23 @@ if ! runuser -u codepilot-agent -- /usr/bin/bwrap --ro-bind / / --proc /proc --d
 fi
 
 for attempt in $(seq 1 10); do
-  if curl -fsS --connect-timeout 2 --max-time 4 http://127.0.0.1:8765/health >/dev/null 2>&1; then
-    echo "CodePilot VM Agent restarted successfully."
-    systemctl --no-pager --full status codepilot-agent | sed -n '1,8p'
-    exit 0
+  if curl -fsS --connect-timeout 1 --max-time 3 http://127.0.0.1:8765/healthz >/dev/null 2>&1; then
+    if [ ! -x /usr/local/sbin/codepilot-checkpoint ] || /usr/local/sbin/codepilot-checkpoint health >/dev/null 2>&1; then
+      echo "CodePilot VM Agent restarted successfully."
+      systemctl --no-pager --full status codepilot-agent | sed -n '1,8p'
+      exit 0
+    fi
   fi
   sleep 1
 done
 
 echo "VM Agent did not become healthy after restart." >&2
+if [ -n "$checkpoint_id" ] && [ -x /usr/local/sbin/codepilot-checkpoint ]; then
+  echo "Automatic rollback to $checkpoint_id ..." >&2
+  if /usr/local/sbin/codepilot-checkpoint restore "$checkpoint_id" --yes; then
+    echo "Automatic rollback completed." >&2
+  else
+    echo "Automatic rollback needs attention; inspect checkpoint status." >&2
+  fi
+fi
 exit 1
