@@ -826,6 +826,21 @@ export default {
         return new Response(upstream.body, { status: upstream.status, headers });
       }
 
+      if (path === "/vm-desktop/clipboard" && request.method === "GET") {
+        if (!(await requestIsAuthenticated())) {
+          return json({ success: false, error: "Authentication required." }, 401);
+        }
+        try {
+          const result = await callVmAgentJson("/desktop/clipboard", {
+            method: "GET",
+            timeout: 8000
+          });
+          return json(result);
+        } catch (error) {
+          return json({ success: false, error: error.message || "VM clipboard read failed." }, error.status || 502);
+        }
+      }
+
       if (path === "/vm-desktop/input" && request.method === "POST") {
         if (!(await requestIsAuthenticated())) {
           return json({ success: false, error: "Authentication required." }, 401);
