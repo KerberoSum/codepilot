@@ -628,6 +628,7 @@ body.auth-locked #authModal{display:grid!important;background:var(--bg)}
       <button class="agent-secondary" onclick="sendRemoteKey('Tab')">Tab</button>
       <button class="agent-secondary" onclick="sendRemoteChord(['Control','l'])">Ctrl+L</button>
       <button class="agent-secondary" onclick="sendRemoteChord(['Control','c'])">Ctrl+C</button>
+      <button class="agent-secondary" onclick="copyRemoteClipboard()" title="Copy selected text from the VM to this device">Copy from VM</button>
       <button class="agent-secondary" onclick="pasteRemoteClipboard()">Paste local</button>
       <input id="remoteTextInput" class="remote-text-input" placeholder="Type text here, then Send" onkeydown="remoteTextKeydown(event)">
       <button class="agent-secondary" onclick="sendRemoteText()">Send text</button>
@@ -1086,6 +1087,49 @@ async function toggleRemoteFullscreen(){
     if(document.fullscreenElement)await document.exitFullscreen();
     else await page?.requestFullscreen?.();
   }catch(e){setRemoteScreenStatus(e.message||"Fullscreen unavailable","error");}
+}
+
+async function copyTextToLocalClipboard(text){
+  try{
+    await navigator.clipboard.writeText(text);
+    return true;
+  }catch{}
+  const area=document.createElement("textarea");
+  area.value=text;
+  area.setAttribute("readonly","");
+  area.style.position="fixed";
+  area.style.left="-9999px";
+  area.style.top="0";
+  document.body.appendChild(area);
+  area.focus();area.select();
+  let copied=false;
+  try{copied=document.execCommand("copy")}catch{}
+  area.remove();
+  return copied;
+}
+
+async function copyRemoteClipboard(){
+  try{
+    if(!remoteViewOnly){
+      await sendRemoteInput({type:"chord",keys:["Control","c"]},{refresh:false});
+      await new Promise(resolve=>setTimeout(resolve,120));
+    }
+    const data=await api("/vm-desktop/clipboard",{signal:AbortSignal.timeout(8000)});
+    const text=String(data?.text||"");
+    if(!text){
+      setRemoteScreenStatus("VM clipboard empty");
+      return;
+    }
+    const copied=await copyTextToLocalClipboard(text);
+    if(!copied){
+      setRemoteScreenStatus("Browser blocked local clipboard","error");
+      return;
+    }
+    const suffix=data?.truncated?" · first 100 KB":"";
+    setRemoteScreenStatus("Copied from VM · "+text.length+" chars"+suffix,"ready");
+  }catch(e){
+    setRemoteScreenStatus(e.message||"VM clipboard unavailable","error");
+  }
 }
 
 async function pasteRemoteClipboard(){
