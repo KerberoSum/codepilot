@@ -999,7 +999,7 @@ function connectRemoteSocket(){
       if(msg.type==="ready"){
         remoteTurboActive=true;
 
-[executed on device: ubuntu-free (a69c6817-5402-4830-b175-81585c2a08b0)]        setRemoteScreenStatus("Turbo ready","ready");
+        setRemoteScreenStatus("Turbo ready","ready");
       }else if(msg.type==="frame_meta"){
         remoteTurboMeta=msg;
       }else if(msg.type==="error"){
@@ -2000,7 +2000,7 @@ function loadVmAgentHistory(){
     const data=raw?JSON.parse(raw):[];
     return Array.isArray(data)?data:[];
 
-[executed on device: ubuntu-free (a69c6817-5402-4830-b175-81585c2a08b0)]  }catch{return []}
+  }catch{return []}
 }
 
 function saveVmAgentHistory(items){
@@ -3001,7 +3001,7 @@ function addMessage(role,text,tokens=0,scroll=true,updatedFiles=[],attachmentNam
   if(updatedFiles.length){
     const n=document.createElement("div");n.className="file-update-note";n.textContent="Updated: "+updatedFiles.map(f=>f.name).join(", ");body.appendChild(n);
 
-[executed on device: ubuntu-free (a69c6817-5402-4830-b175-81585c2a08b0)]  }
+  }
   wrap.append(av,body);c.appendChild(wrap);if(scroll)c.scrollTop=c.scrollHeight;
 }
 
@@ -3476,4 +3476,3 @@ function firstNumber(...v){for(const x of v){if(x===null||x===undefined||x==="")
 </body>
 </html>
 
-[executed on device: ubuntu-free (a69c6817-5402-4830-b175-81585c2a08b0)]
