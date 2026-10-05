@@ -17,6 +17,7 @@ PORT = int(os.environ.get("CODEPILOT_DESKTOP_RELAY_PORT", "8770"))
 DISPLAY = os.environ.get("DISPLAY", ":1")
 XAUTHORITY = os.environ.get("XAUTHORITY", "/home/ubuntu/.Xauthority")
 ENV = {**os.environ, "DISPLAY": DISPLAY, "XAUTHORITY": XAUTHORITY}
+CLIPBOARD_MAX_BYTES = 100 * 1024
 capture_lock = threading.Lock()
 
 X11 = ctypes.CDLL("libX11.so.6")
@@ -279,6 +280,28 @@ def handle_input(data):
     finally:
         X11.XCloseDisplay(d)
 
+def read_clipboard_text():
+    try:
+        completed = subprocess.run(
+            ["/usr/bin/xclip", "-selection", "clipboard", "-o"],
+            env=ENV,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            timeout=3,
+            check=False,
+        )
+    except subprocess.TimeoutExpired as exc:
+        raise RuntimeError("VM clipboard timed out") from exc
+
+    if completed.returncode != 0:
+        return {"ok": True, "text": "", "truncated": False}
+
+    raw = completed.stdout or b""
+    truncated = len(raw) > CLIPBOARD_MAX_BYTES
+    text = raw[:CLIPBOARD_MAX_BYTES].decode("utf-8", errors="replace")
+    return {"ok": True, "text": text, "truncated": truncated}
+
+
 class Handler(BaseHTTPRequestHandler):
     server_version = "CodePilotDesktopRelay/1.0"
 
@@ -302,6 +325,12 @@ class Handler(BaseHTTPRequestHandler):
                 w, h = display_size(d)
                 X11.XCloseDisplay(d)
                 self._json(200, {"ok": True, "display": DISPLAY, "width": w, "height": h})
+            except Exception as e:
+                self._json(503, {"ok": False, "error": str(e)})
+            return
+        if parsed.path.startswith("/clipboard"):
+            try:
+                self._json(200, read_clipboard_text())
             except Exception as e:
                 self._json(503, {"ok": False, "error": str(e)})
             return
