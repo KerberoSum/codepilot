@@ -1273,6 +1273,26 @@ async def desktop_frame(
     return Response(content=raw, media_type=headers.get("Content-Type", "image/jpeg"), headers=response_headers)
 
 
+@app.get("/desktop/clipboard")
+async def desktop_clipboard(authorization: Optional[str] = Header(default=None)):
+    require_auth(authorization)
+    try:
+        status, _headers, raw = await asyncio.to_thread(desktop_relay_call, "/clipboard", "GET", None, 5.0)
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail=f"Desktop relay unavailable: {exc}")
+    try:
+        result = json.loads(raw.decode("utf-8")) if raw else {}
+    except Exception:
+        result = {}
+    if status != 200 or not result.get("ok"):
+        raise HTTPException(status_code=502, detail=result.get("error") or "VM clipboard read failed.")
+    return {
+        "ok": True,
+        "text": str(result.get("text") or ""),
+        "truncated": bool(result.get("truncated")),
+    }
+
+
 @app.post("/desktop/input")
 async def desktop_input(req: DesktopInputRequest, authorization: Optional[str] = Header(default=None)):
     require_auth(authorization)
