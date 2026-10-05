@@ -192,7 +192,7 @@ body.auth-locked #authModal{display:grid!important;background:var(--bg)}
 .remote-page{position:fixed;inset:0;z-index:73;display:flex;flex-direction:column;background:#05070a;color:#e6edf3}
 .remote-body{flex:1;min-height:0;display:flex;flex-direction:column;background:#05070a}
 .remote-toolbar{min-height:42px;display:flex;align-items:center;gap:8px;padding:7px 12px;border-bottom:1px solid var(--border);background:var(--panel);flex-wrap:wrap}
-.remote-toolbar .remote-status{font-size:9px;color:var(--muted);min-width:100px}.remote-toolbar .remote-status.ready{color:var(--green)}.remote-toolbar .remote-status.error{color:var(--red)}
+.remote-toolbar .remote-status{font-size:9px;color:var(--muted);flex:0 0 150px;width:150px;max-width:150px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.remote-toolbar .remote-status.ready{color:var(--green)}.remote-toolbar .remote-status.error{color:var(--red)}
 .remote-stage{flex:1;min-height:0;overflow:auto;display:flex;align-items:flex-start;justify-content:center;background:#020305;outline:none;touch-action:none;user-select:none}
 .remote-stage:focus{box-shadow:inset 0 0 0 1px rgba(116,87,255,.55)}
 .remote-stage.view-only .remote-screen{cursor:not-allowed;opacity:.94}
@@ -864,7 +864,7 @@ function openRemoteDesktop(){
 
 function setRemoteScreenStatus(text,state=""){
   const el=document.getElementById("remoteScreenStatus");if(!el)return;
-  el.textContent=text;el.className="remote-status"+(state?" "+state:"");
+  el.textContent=text;el.title=text;el.className="remote-status"+(state?" "+state:"");
 }
 
 function closeRemoteSocket(){
