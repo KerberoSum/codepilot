@@ -82,8 +82,8 @@ body.auth-locked #authModal{display:grid!important;background:var(--bg)}
 .msg-text code{font-family:"SFMono-Regular",Consolas,"Liberation Mono",monospace;background:#151b25;border:1px solid var(--border2);border-radius:4px;padding:.08em .32em;font-size:.9em}
 .msg-text a{color:#9db8ff;text-decoration:underline;text-underline-offset:2px}.msg-text strong{color:#fff}
 .markdown-table-wrap{width:100%;overflow-x:auto;margin:.65em 0;border:1px solid var(--border);border-radius:8px}
-.markdown-table{width:100%;border-collapse:collapse;font-size:.95em;background:#0b1017}
-.markdown-table th,.markdown-table td{padding:7px 9px;border-right:1px solid var(--border2);border-bottom:1px solid var(--border2);text-align:left;vertical-align:top}
+.markdown-table{width:100%;min-width:100%;border-collapse:collapse;font-size:.95em;background:#0b1017}
+.markdown-table th,.markdown-table td{padding:7px 9px;border-right:1px solid var(--border2);border-bottom:1px solid var(--border2);text-align:left;vertical-align:top;overflow-wrap:anywhere}
 .markdown-table th{background:#151c27;color:#fff;font-weight:700}.markdown-table tr:last-child td{border-bottom:0}.markdown-table th:last-child,.markdown-table td:last-child{border-right:0}
 .md-hr{border:0;border-top:1px solid var(--border);margin:.85em 0}
 .codebox{width:100%;min-width:0;max-width:100%;margin:8px 0;border:1px solid var(--border);border-radius:8px;overflow:hidden;background:#070a0f}
@@ -3006,16 +3006,64 @@ function addMessage(role,text,tokens=0,scroll=true,updatedFiles=[],attachmentNam
   wrap.append(av,body);c.appendChild(wrap);if(scroll)c.scrollTop=c.scrollHeight;
 }
 
+function parsePlainTextGrid(text){
+  const rawLines=String(text||"").replace(/\r\n?/g,"\n").split("\n").map(line=>line.trimEnd()).filter(line=>line.trim());
+  if(rawLines.length<2)return null;
+  const isBorder=line=>/^\s*\+[+\-=:\s]+\+\s*$/.test(line)||/^\s*[-=]{3,}(?:\s+[-=]{3,})+\s*$/.test(line);
+  const lines=rawLines.filter(line=>!isBorder(line));
+  if(lines.length<2)return null;
+  let rows=[],strongDelimiter=false;
+  if(lines.every(line=>line.includes("|"))){
+    strongDelimiter=true;
+    rows=lines.map(line=>{
+      let value=line.trim();if(value.startsWith("|"))value=value.slice(1);if(value.endsWith("|"))value=value.slice(0,-1);
+      return value.split("|").map(cell=>cell.trim());
+    });
+  }else if(lines.every(line=>line.includes("\t"))){
+    strongDelimiter=true;
+    rows=lines.map(line=>line.trim().split(/\t+/).map(cell=>cell.trim()));
+  }else{
+    rows=lines.map(line=>line.trim().split(/\s{2,}/).map(cell=>cell.trim()));
+  }
+  if(rows.length<2)return null;
+  const separatorIndex=rows.length>1&&rows[1].length>1&&rows[1].every(cell=>/^:?-{3,}:?$/.test(cell))?1:-1;
+  if(separatorIndex===1){rows.splice(1,1);strongDelimiter=true;}
+  if(rows.length<2)return null;
+  const columnCount=rows[0].length;
+  if(columnCount<2||rows.some(row=>row.length!==columnCount))return null;
+  if(!strongDelimiter&&rows.length<3)return null;
+  return {headers:rows[0],rows:rows.slice(1)};
+}
+
+function appendGridTable(parent,grid){
+  const wrap=document.createElement("div");wrap.className="markdown-table-wrap";
+  const table=document.createElement("table");table.className="markdown-table";
+  const thead=document.createElement("thead"),headRow=document.createElement("tr");
+  grid.headers.forEach(cell=>{const th=document.createElement("th");appendInlineMarkdown(th,cell);headRow.appendChild(th);});
+  thead.appendChild(headRow);table.appendChild(thead);
+  const tbody=document.createElement("tbody");
+  grid.rows.forEach(cells=>{
+    const row=document.createElement("tr");
+    grid.headers.forEach((_,index)=>{const td=document.createElement("td");appendInlineMarkdown(td,cells[index]||"");row.appendChild(td);});
+    tbody.appendChild(row);
+  });
+  table.appendChild(tbody);wrap.appendChild(table);parent.appendChild(wrap);
+}
+
 function renderAIText(parent,text){
   const str=String(text||"").replace(/\r\n?/g,"\n"),re=/```([^\n`]*)\n?([\s\S]*?)```/g;let last=0,m;
   while((m=re.exec(str))){
     const before=str.slice(last,m.index);if(before.trim())appendAIMarkdown(parent,before);
-    const box=document.createElement("div");box.className="codebox";
     let language=(m[1]||"").trim(),code=m[2]||"";
     // Some models emit an HTML break instead of a real newline after the fence language.
     const fenceBreak=language.match(/^(.*?)\s*(?:<br\s*\/?\s*>|&lt;br\s*\/?\s*&gt;)([\s\S]*)$/i);
     if(fenceBreak){language=fenceBreak[1].trim();code=fenceBreak[2]+(code?"\n"+code:"");}
     code=code.replace(/(?:<br\s*\/?\s*>|&lt;br\s*\/?\s*&gt;)/gi,"\n").replace(/^\n+|\n+$/g,"");
+    const plainFence=!language||/^(?:text|plaintext|plain|txt)$/i.test(language);
+    const grid=plainFence?parsePlainTextGrid(code):null;
+    if(grid){appendGridTable(parent,grid);last=re.lastIndex;continue;}
+    if(/^(?:md|markdown)$/i.test(language)){appendAIMarkdown(parent,code);last=re.lastIndex;continue;}
+    const box=document.createElement("div");box.className="codebox";
     const h=document.createElement("div");h.className="codehead";const l=document.createElement("span");l.textContent=language||"code";
     const b=document.createElement("button");b.className="copy-btn";b.textContent="Copy";b.setAttribute("aria-label","Copy code");
     const pre=document.createElement("pre");pre.textContent=code;
@@ -3024,7 +3072,6 @@ function renderAIText(parent,text){
   }
   const rest=str.slice(last);if(rest.trim())appendAIMarkdown(parent,rest);
 }
-
 function appendAIMarkdown(parent,text){
   const root=document.createElement("div");root.className="msg-text";
   const lines=String(text||"").replace(/\r\n?/g,"\n").split("\n");
