@@ -512,8 +512,25 @@ export default {
           signal: AbortSignal.timeout(options.timeout || 20000)
         };
         if (options.body !== undefined) {
+          let body = options.body;
+          if (agentPath === "/desktop/input" && body?.type === "chord" && Array.isArray(body.keys)) {
+            const x11ChordKeysyms = {
+              Enter: 0xff0d, Backspace: 0xff08, Tab: 0xff09, Escape: 0xff1b,
+              ArrowLeft: 0xff51, ArrowUp: 0xff52, ArrowRight: 0xff53, ArrowDown: 0xff54,
+              Delete: 0xffff, Home: 0xff50, End: 0xff57, PageUp: 0xff55, PageDown: 0xff56,
+              Shift: 0xffe1, Control: 0xffe3, Alt: 0xffe9, Meta: 0xffeb
+            };
+            body = {
+              ...body,
+              keys: body.keys.slice(0, 4).map(key => {
+                const name = String(key);
+                const keysym = x11ChordKeysyms[name];
+                return keysym ? String.fromCodePoint(keysym) : name;
+              })
+            };
+          }
           headers["Content-Type"] = "application/json";
-          init.body = JSON.stringify(options.body);
+          init.body = JSON.stringify(body);
         }
 
         const response = await fetch(vmBase + agentPath, init);
