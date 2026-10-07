@@ -626,6 +626,7 @@ body.auth-locked #authModal{display:grid!important;background:var(--bg)}
       <button class="agent-secondary" onclick="setRemoteZoom(remoteZoom+.15)">＋</button>
       <button class="agent-secondary" onclick="refreshRemoteScreen(true)">Refresh</button>
       <button class="agent-secondary" onclick="sendRemoteKey('Enter')">Enter</button>
+      <button class="agent-secondary" onclick="sendRemoteChord(['Shift','Enter'])" title="Insert a new line in apps such as ChatGPT Desktop">Shift+Enter</button>
       <button class="agent-secondary" onclick="sendRemoteKey('Backspace')">⌫</button>
       <button class="agent-secondary" onclick="sendRemoteKey('Escape')">Esc</button>
       <button class="agent-secondary" onclick="sendRemoteKey('Tab')">Tab</button>
@@ -648,7 +649,7 @@ body.auth-locked #authModal{display:grid!important;background:var(--bg)}
       <div id="remoteScreenPlaceholder" class="remote-placeholder">Loading VM desktop…</div>
       <img id="remoteScreenImage" class="remote-screen hidden" alt="VM desktop" draggable="false">
     </div>
-    <div class="remote-note">Auto mode tries WebSocket Turbo first, then falls back to authenticated HTTPS when blocked. Screen updates pause automatically while this browser tab is hidden and resume when you return.</div>
+    <div class="remote-note">Auto mode tries WebSocket Turbo first, then falls back to authenticated HTTPS when blocked. Keyboard focus on the remote screen supports Shift+Enter for a new line in ChatGPT Desktop. Screen updates pause automatically while this browser tab is hidden and resume when you return.</div>
   </div>
 </section>
 
@@ -1319,21 +1320,34 @@ function remoteWheel(e){
 function sendRemoteKey(key){return sendRemoteInput({type:"key",key});}
 function sendRemoteChord(keys){return sendRemoteInput({type:"chord",keys});}
 
-function sendRemoteText(){
-  const input=document.getElementById("remoteTextInput");if(!input)return;
-  const text=input.value;if(!text)return;
+async function sendRemoteText({focus=true}={}){
+  const input=document.getElementById("remoteTextInput");if(!input)return null;
+  const text=input.value;if(!text)return null;
   input.value="";
-  sendRemoteInput({type:"text",text});
-  setTimeout(()=>document.getElementById("remoteStage")?.focus(),20);
+  const result=await sendRemoteInput({type:"text",text},{refresh:false});
+  if(focus)setTimeout(()=>document.getElementById("remoteStage")?.focus(),20);
+  else scheduleRemoteScreen(120);
+  return result;
 }
 
-function remoteTextKeydown(e){
-  if(e.key==="Enter"&&!e.shiftKey){e.preventDefault();sendRemoteText();}
+async function remoteTextKeydown(e){
+  if(e.key!=="Enter"||e.isComposing)return;
+  e.preventDefault();
+  if(e.shiftKey){
+    await sendRemoteText({focus:false});
+    await sendRemoteChord(["Shift","Enter"]);
+    setTimeout(()=>document.getElementById("remoteStage")?.focus(),20);
+    return;
+  }
+  await sendRemoteText();
 }
 
 function remoteStageKeydown(e){
   if(vmActivePage!=="remote"||remoteViewOnly)return;
   if(["Shift","Control","Alt","Meta"].includes(e.key))return;
+  if(e.key==="Enter"&&e.shiftKey&&!e.ctrlKey&&!e.metaKey&&!e.altKey){
+    e.preventDefault();sendRemoteChord(["Shift","Enter"]);return;
+  }
   const modifier=e.ctrlKey||e.metaKey||e.altKey;
   if(modifier){
     const keys=[];
