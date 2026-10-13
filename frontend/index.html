@@ -4,6 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <title>CodePilot v3.1</title>
+<link rel="stylesheet" href="./temml.css">
 <style>
 *{box-sizing:border-box}html,body{margin:0;width:100%;height:100%;overflow:hidden}
 :root{
@@ -152,7 +153,16 @@ body.auth-locked #authModal{display:grid!important;background:var(--bg)}
 .agent-chat{max-width:900px;margin:0 auto;display:flex;flex-direction:column;gap:14px}
 .agent-chat-msg{display:flex;gap:9px;align-items:flex-start}.agent-chat-msg.user{justify-content:flex-end}.agent-chat-msg.user .agent-chat-bubble{background:#182235;border-color:#2a3951}.agent-chat-msg.assistant .agent-chat-bubble{background:var(--panel);border-color:var(--border)}
 .agent-chat-bubble{max-width:min(780px,88%);border:1px solid var(--border);border-radius:12px;padding:11px 12px;overflow-wrap:anywhere}.agent-chat-role{font-size:8px;font-weight:800;color:var(--muted);margin-bottom:5px;text-transform:uppercase;letter-spacing:.6px}.agent-chat-msg.user .agent-chat-role{text-align:right}
-.agent-chat-bubble>.msg-text{font-size:11px}.agent-chat-error{border-color:rgba(255,102,125,.45)!important;background:rgba(255,102,125,.07)!important}.agent-chat-pending{color:var(--muted)}
+.agent-chat-bubble>.msg-text{font-size:13px}
+/* Shared Markdown renderer (all VM Agent/AI providers) */
+.agent-chat-bubble{min-width:0}.agent-chat-msg.assistant .agent-chat-bubble{width:min(780px,88%)}
+.msg-text{font-size:clamp(11px,var(--chat-font-size,12px),16px)}
+.msg-text table{width:100%;border-collapse:collapse}.msg-text th,.msg-text td{border:1px solid var(--border);padding:7px 9px;vertical-align:top;overflow-wrap:anywhere}.msg-text th{background:var(--panel3)}
+.msg-text hr{border:0;border-top:1px solid var(--border);margin:1em 0}
+.msg-text .task-list-item{list-style:none}.msg-text .task-list-item input[type=checkbox]{accent-color:var(--accent);vertical-align:middle;margin:0 .45em 0 0}.msg-text .contains-task-list{list-style:none}
+.msg-text .codebox{max-width:100%}.msg-text .codebox pre code{background:transparent;border:0;padding:0;font:inherit;color:inherit;white-space:inherit}.msg-text .codebox pre{font-size:11px;tab-size:2}
+.msg-text pre{max-width:100%;overflow:auto}.msg-text .hljs-keyword,.msg-text .hljs-selector-tag,.msg-text .hljs-literal{color:#c6a8ff}.msg-text .hljs-string,.msg-text .hljs-attr{color:#a4dc9b}.msg-text .hljs-number,.msg-text .hljs-variable,.msg-text .hljs-template-variable{color:#f5c889}.msg-text .hljs-comment,.msg-text .hljs-quote{color:#8494a5}.msg-text .hljs-title,.msg-text .hljs-function,.msg-text .hljs-built_in{color:#8cc5ff}
+.msg-text eq{display:inline-block;vertical-align:middle}.msg-text eqn{display:block;max-width:100%;overflow-x:auto;padding:.3em 0}.msg-text math{max-width:100%}.msg-text math.tml-display{overflow-x:auto;overflow-y:hidden;padding:.45em 0}.msg-text p math{display:inline-block;vertical-align:middle}.agent-chat-error{border-color:rgba(255,102,125,.45)!important;background:rgba(255,102,125,.07)!important}.agent-chat-pending{color:var(--muted)}
 .agent-run-meta{max-width:900px;margin:7px auto 0}
 .vm-timeline{max-width:900px;margin:0 auto 12px;border:1px solid var(--border);border-radius:10px;background:var(--panel);overflow:hidden}
 .vm-timeline-toggle{width:100%;display:flex;align-items:center;gap:7px;border:0;background:transparent;color:var(--muted);padding:7px 9px;text-align:left;font-size:9px;font-weight:700}.vm-timeline-toggle:hover{background:var(--panel2);color:#fff}.vm-timeline-toggle strong{color:inherit}.vm-timeline-count{min-width:20px;padding:1px 5px;border:1px solid var(--border);border-radius:999px;text-align:center;font-size:7px;color:#dbe5f2;background:var(--panel3)}.vm-timeline-arrow{margin-left:auto;font-size:8px}
@@ -739,6 +749,7 @@ This shell runs as the unprivileged codepilot-agent service account.
   </div>
 </div>
 
+<script src="./markdown-renderer.min.js"></script>
 <script>
 /* =========================================================
    CHANGE ONLY THIS VALUE
@@ -2130,6 +2141,17 @@ async function runVmAgentTask(){
           :"Queueing with Remote Worker…";
   const started=performance.now();
   let finalData=null,streamFailure=null,pending=null;
+  let streamedText="",streamRenderQueued=false;
+  const updateStreamPreview=()=>{
+    streamRenderQueued=false;
+    const bubble=pending?.querySelector(".agent-chat-bubble");if(!bubble)return;
+    bubble.classList.remove("agent-chat-pending");
+    let content=bubble.querySelector(".msg-text");
+    if(!content){content=document.createElement("div");content.className="msg-text";bubble.appendChild(content);}
+    content.innerHTML=window.CodePilotMarkdown?.render?window.CodePilotMarkdown.render(streamedText):"";
+    if(!window.CodePilotMarkdown?.render)content.textContent=streamedText;
+    if(pending.parentElement?.parentElement)pending.parentElement.parentElement.scrollTop=pending.parentElement.parentElement.scrollHeight;
+  };
 
   try{
     await ensureVmChat(prompt,mode,web,provider);
@@ -2163,6 +2185,9 @@ async function runVmAgentTask(){
           if(event==="status"){
             const stage=data.stage||data.status||data.message||"working";
             meta.textContent="Status: "+stage+" · "+((performance.now()-started)/1000).toFixed(1)+" s";
+          }else if(event==="delta"||event==="chunk"){
+            const delta=typeof data.delta==="string"?data.delta:typeof data.text==="string"?data.text:"";
+            if(delta){streamedText+=delta;if(!streamRenderQueued){streamRenderQueued=true;requestAnimationFrame(updateStreamPreview);}}
           }else if(event==="result"){
             if(data.ok===false||data.error){const err=new Error(data.error||"VM Agent task failed.");err.noFallback=true;throw err;}
             finalData=data;
@@ -3077,6 +3102,10 @@ function appendGridTable(parent,grid){
 }
 
 function renderAIText(parent,text){
+  if(window.CodePilotMarkdown?.renderInto){
+    try{return window.CodePilotMarkdown.renderInto(parent,String(text||""));}
+    catch(e){console.warn("Modern Markdown render unavailable; using fallback",e);}
+  }
   const str=String(text||"").replace(/\r\n?/g,"\n"),re=/```([^\n`]*)\n?([\s\S]*?)```/g;let last=0,m;
   while((m=re.exec(str))){
     const before=str.slice(last,m.index);if(before.trim())appendAIMarkdown(parent,before);
