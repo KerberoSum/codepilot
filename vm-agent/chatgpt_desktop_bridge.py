@@ -362,21 +362,75 @@ def send_prompt(cdp: CDP, prompt: str):
 
 
 def subtree_plain_text(all_nodes, root_id):
+    """Serialize ChatGPT's accessibility tree to readable Markdown.
+
+    In the desktop UI, inline <code> elements have AX role 'code' too.
+    The old bridge fenced *every* AX code node, corrupting inline values,
+    table cells and code samples with dozens of stray '~~~' sequences.
+    This serializer uses each node's AX parent to distinguish them and
+    handles native accessible tables as Markdown tables.
+    """
     by_id = {node.get("nodeId"): node for node in all_nodes}
+
+    def children_of(node):
+        return [by_id[cid] for cid in node.get("childIds") or [] if cid in by_id]
+
+    def descendants(node, target):
+        """Find table/row descendants while not crossing into nested tables."""
+        found = []
+        for child in children_of(node):
+            low = role(child).lower()
+            if low == target:
+                found.append(child)
+            elif low != "table" and low not in {"row", "cell", "columnheader", "rowheader"}:
+                found.extend(descendants(child, target))
+        return found
+
+    def inline_code(text):
+        value = text.strip()
+        longest = max((len(m.group()) for m in re.finditer(r"`+", value)), default=0)
+        tick = "`" * (longest + 1)
+        padded = " " if value.startswith("`") or value.endswith("`") else ""
+        return tick + padded + value + padded + tick
 
     def render(node):
         if not node:
             return ""
         node_role = role(node)
         node_name = name(node)
-        if node_role == "InlineTextBox":
-            return ""
-        if node_role == "StaticText":
-            return node_name
-        children = [by_id.get(cid) for cid in node.get("childIds") or []]
-        inner = "".join(render(child) for child in children if child)
         low = node_role.lower()
+        if low == "inlinetextbox":
+            return ""
+        if low == "statictext":
+            return node_name
 
+        children = children_of(node)
+        if low == "table":
+            rows = []
+            for row in descendants(node, "row"):
+                cells = []
+                headers = []
+                for cell in children_of(row):
+                    candidates = [cell] if role(cell).lower() in {"columnheader", "rowheader", "cell"} else (
+                        descendants(cell, "columnheader") + descendants(cell, "rowheader") + descendants(cell, "cell")
+                    )
+                    for candidate in candidates:
+                        text = render(candidate).strip()
+                        text = re.sub(r"\s*\n+\s*", "<br>", text)
+                        cells.append(text.replace("|", r"\|"))
+                        headers.append(role(candidate).lower() in {"columnheader", "rowheader"})
+                if cells:
+                    rows.append((cells, all(headers)))
+            if rows and rows[0][0]:
+                count = len(rows[0][0])
+                rows = [(cells, hdr) for cells, hdr in rows if len(cells) == count]
+                if rows:
+                    output = ["| " + " | ".join(rows[0][0]) + " |",
+                              "| " + " | ".join(["---"] * count) + " |"]
+                    output.extend("| " + " | ".join(cells) + " |" for cells, _ in rows[1:])
+                    return "\n\n" + "\n".join(output) + "\n\n"
+
+        inner = "".join(render(child) for child in children)
         if low == "paragraph":
             return inner.strip() + "\n\n" if inner.strip() else ""
         if low == "heading":
@@ -388,13 +442,26 @@ def subtree_plain_text(all_nodes, root_id):
             text = inner.strip() or node_name.strip()
             return ("#" * level + " " + text + "\n\n") if text else ""
         if low == "listitem":
-            text = inner.strip()
-            return ("- " + text.replace("\n\n", "\n  ") + "\n") if text else ""
+            marker = next((name(c).strip() for c in children if role(c).lower() == "listmarker"), "")
+            bullet = marker if re.match(r"^\d+[.)]$", marker) else "-"
+            text = "".join(render(child) for child in children if role(child).lower() != "listmarker").strip()
+            return (bullet + " " + text.replace("\n\n", "\n  ") + "\n") if text else ""
         if low == "list":
             return inner.rstrip() + "\n\n" if inner.strip() else ""
-        if low in {"code", "pre"}:
+        if low == "code":
             text = inner.strip() or node_name.strip()
-            return ("~~~\n" + text + "\n~~~\n\n") if text else ""
+            if not text:
+                return ""
+            parent = by_id.get(node.get("parentId"))
+            # Normal inline code is a child of an AX paragraph (including
+            # table cell paragraphs). Actual code panes have a generic parent.
+            if parent and role(parent).lower() in {"paragraph", "cell", "columnheader", "rowheader", "heading", "listitem", "link"}:
+                return inline_code(text)
+            fence = "~" * max(3, 1 + max((len(m.group()) for m in re.finditer(r"~{3,}", text)), default=0))
+            return "\n\n" + fence + "\n" + text + "\n" + fence + "\n\n"
+        if low == "pre":
+            text = inner.strip() or node_name.strip()
+            return ("\n\n~~~\n" + text + "\n~~~\n\n") if text else ""
         if low == "blockquote":
             text = inner.strip()
             return "\n".join("> " + line for line in text.splitlines()) + "\n\n" if text else ""

@@ -103,7 +103,25 @@ md.renderer.rules.link_open=(tokens,idx,options,env,self)=>{
   tokens[idx].attrSet('rel','noopener noreferrer');
   return originalLinkOpen(tokens,idx,options,env,self);
 };
-const safe=(text)=>md.render(String(text||'').replace(/\r\n?/g,'\n'));
+// Legacy ChatGPT Desktop bridge erroneously fenced every inline <code> token.
+// Fix already-saved answers without touching their stored text. Apply only when
+// a reply contains many short artificial blocks (normal code replies unaffected).
+function restoreLegacyDesktopReply(source){
+  let text=String(source||'').replace(/\r\n?/g,'\n');
+  const bogus=/~~~\n([^\n]{1,64})\n~~~/g;
+  const found=[...text.matchAll(bogus)];
+  if(found.length<8)return text;
+  text=text.replace(bogus,(_,body)=>{
+    const ticks='`'.repeat(Math.max(1,...[...body.matchAll(/`+/g)].map(x=>x[0].length+1)));
+    return ticks+body+ticks;
+  });
+  // Older bridge also joined the code-language label to the fence opener.
+  text=text.replace(/([^\n])~~~\n/g,'$1\n\n~~~\n');
+  // Repair words which the old bridge split around a fenced inline token.
+  text=text.replace(/(`[^`\n]{1,64}`)\n\n +(?=[a-z])/g,'$1 ');
+  return text;
+}
+const safe=(text)=>md.render(restoreLegacyDesktopReply(text));
 window.CodePilotMarkdown=Object.freeze({
   render:safe,
   renderInto:(parent,text)=>{
