@@ -18,7 +18,7 @@ WS_GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
 
 
 class WebSocket:
-    def __init__(self, url: str, timeout: float = 10.0):
+    def __init__(self, url: str, timeout: float = 35.0):
         parsed = urllib.parse.urlparse(url)
         if parsed.scheme != "ws":
             raise RuntimeError("Only local ws:// DevTools targets are supported")
@@ -433,6 +433,7 @@ def wait_for_answer(cdp: CDP, timeout: float):
     previous = ""
     stable = 0
     latest = ""
+    still_generating = False
     while time.monotonic() < deadline:
         nodes, all_nodes = visible_nodes(cdp)
         answer = latest_answer(all_nodes)
@@ -445,15 +446,19 @@ def wait_for_answer(cdp: CDP, timeout: float):
                 previous = answer
             button_names = [name(n).lower() for n in nodes if role(n) == "button"]
             stopping = any(label.startswith("stop") or "stop generating" in label for label in button_names)
+            still_generating = stopping
             has_copy = any(label == "copy" for label in button_names)
             has_latest = any(role(n) == "StaticText" and name(n) == "Latest response" for n in nodes)
             has_send = any(label == "send" for label in button_names)
             if stable >= 2 and not stopping and (has_copy or has_latest or has_send):
                 return answer
         time.sleep(0.65)
-    if latest:
+    if latest and not still_generating:
         return latest
-    raise RuntimeError("Timed out waiting for ChatGPT Desktop reply")
+    raise RuntimeError(
+        f"ChatGPT Desktop did not finish within {int(timeout // 60)} minutes; "
+        "the desktop application may still be generating a reply."
+    )
 
 
 def run(prompt: str, timeout: float):

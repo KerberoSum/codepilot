@@ -115,6 +115,9 @@ body.auth-locked #authModal{display:grid!important;background:var(--bg)}
 .modal{width:min(430px,100%);border:1px solid var(--border);border-radius:13px;background:var(--panel2);padding:18px;box-shadow:0 30px 80px rgba(0,0,0,.45)}
 .modal h3{margin:0 0 7px;font-size:15px}.modal p{margin:0 0 13px;color:var(--muted);font-size:10px;line-height:1.5}
 .modal input{width:100%;border:1px solid var(--border);background:var(--panel);color:#fff;border-radius:8px;padding:9px;outline:0}.modal input:focus{border-color:var(--accent)}
+/* Deliberately show a second direct-action copy button: browsers often revoke clipboard
+   write permission after an asynchronous VM network fetch. */
+.remote-clipboard-modal{width:min(650px,100%)}.remote-clipboard-modal textarea{display:block;width:100%;height:clamp(110px,32vh,330px);resize:vertical;border:1px solid var(--border);border-radius:8px;padding:10px;color:var(--text);background:var(--panel);font:12px/1.5 Consolas,monospace;white-space:pre-wrap;overflow:auto}
 .modal-actions{display:flex;justify-content:flex-end;gap:7px;margin-top:13px}.modal-btn{border:1px solid var(--border);border-radius:7px;background:var(--panel3);color:#fff;padding:7px 11px;font-size:10px}.modal-btn.primary{background:var(--accent);border-color:var(--accent)}.modal-btn.danger{color:#fff;background:#9f3144;border-color:#b94358}
 .storage-modal{width:min(820px,100%);max-height:min(86vh,820px);overflow:auto}.storage-summary-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px;margin:12px 0}.storage-card{border:1px solid var(--border);background:var(--panel);border-radius:9px;padding:10px}.storage-card span{display:block;color:var(--muted);font-size:9px;margin-bottom:4px}.storage-card b{font-size:13px;color:#fff}.storage-meter{height:8px;border-radius:999px;background:#080b10;border:1px solid var(--border);overflow:hidden;margin:8px 0}.storage-meter-fill{height:100%;width:0;background:var(--green);transition:.2s}.storage-meter-fill.warn{background:var(--yellow)}.storage-meter-fill.high{background:var(--red)}.storage-explain{color:var(--muted);font-size:9px;line-height:1.5;margin:7px 0 12px}.storage-section{margin-top:14px}.storage-section h4{margin:0 0 6px;font-size:11px;color:#fff}.storage-list{border:1px solid var(--border);border-radius:8px;overflow:hidden}.storage-item{display:grid;grid-template-columns:minmax(0,1fr) auto auto;gap:8px;align-items:center;padding:8px 9px;border-bottom:1px solid var(--border2);font-size:9px}.storage-item:last-child{border-bottom:0}.storage-item-main{min-width:0}.storage-item-title{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:#e8edf5}.storage-item-meta{color:var(--muted);margin-top:2px}.storage-delete{border:1px solid #5d2d38;background:#2a1419;color:#ff9bac;border-radius:6px;padding:4px 7px;font-size:8px}.storage-delete:hover{background:#4a1f29}.storage-empty{padding:9px;color:var(--muted);font-size:9px}@media(max-width:680px){.storage-summary-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.storage-item{grid-template-columns:minmax(0,1fr) auto}.storage-item-size{display:none}}
 .vm-agent-modal{width:min(720px,100%);max-height:min(86vh,780px);overflow:auto}
@@ -642,7 +645,7 @@ body.auth-locked #authModal{display:grid!important;background:var(--bg)}
       <button class="agent-secondary" onclick="sendRemoteKey('Tab')">Tab</button>
       <button class="agent-secondary" onclick="sendRemoteChord(['Control','l'])">Ctrl+L</button>
       <button class="agent-secondary" onclick="sendRemoteChord(['Control','c'])">Ctrl+C</button>
-      <button class="agent-secondary" onclick="copyRemoteClipboard()" title="Copy selected text from the VM to this device">Copy from VM</button>
+      <button id="remoteClipboardReadButton" class="agent-secondary" onclick="copyRemoteClipboard()" title="Read text currently in the VM clipboard; no keystrokes or files are transferred">Copy from VM</button>
       <button class="agent-secondary" onclick="pasteRemoteClipboard()">Paste local</button>
       <input id="remoteTextInput" class="remote-text-input" placeholder="Type text here, then Send" onkeydown="remoteTextKeydown(event)">
       <button class="agent-secondary" onclick="sendRemoteText()">Send text</button>
@@ -707,6 +710,19 @@ This shell runs as the unprivileged codepilot-agent service account.
     <div id="authError" class="auth-note"></div>
     <div class="modal-actions">
       <button id="authButton" class="modal-btn primary" onclick="login()">Unlock</button>
+    </div>
+  </div>
+</div>
+
+<!-- Remote Screen clipboard: text stays in browser memory and is cleared on close. -->
+<div id="remoteClipboardModal" class="modal-bg hidden" role="dialog" aria-modal="true" aria-labelledby="remoteClipboardTitle">
+  <div class="modal remote-clipboard-modal">
+    <h3 id="remoteClipboardTitle">Copy VM clipboard to this PC</h3>
+    <p id="remoteClipboardInfo">Select text in the VM and use Ctrl+C there first. This transfers text only.</p>
+    <textarea id="remoteClipboardPreview" readonly spellcheck="false" aria-label="VM clipboard text preview"></textarea>
+    <div class="modal-actions">
+      <button class="modal-btn" onclick="closeRemoteClipboardModal()">Close</button>
+      <button id="remoteClipboardCopyButton" class="modal-btn primary" onclick="finishRemoteClipboardCopy()">Copy to this PC</button>
     </div>
   </div>
 </div>
@@ -1124,27 +1140,60 @@ async function copyTextToLocalClipboard(text){
   return copied;
 }
 
+function closeRemoteClipboardModal(){
+  const modal=document.getElementById("remoteClipboardModal");
+  modal?.classList.add("hidden");
+  const preview=document.getElementById("remoteClipboardPreview");
+  if(preview)preview.value="";
+}
+
+async function finishRemoteClipboardCopy(){
+  const preview=document.getElementById("remoteClipboardPreview");
+  if(!preview||!preview.value)return;
+  const value=preview.value;
+  // This handler runs directly on a real click, preserving the browser's user activation.
+  let copied=false;
+  try{await navigator.clipboard.writeText(value);copied=true;}catch{}
+  if(!copied){
+    preview.focus();preview.select();
+    try{copied=!!document.execCommand("copy");}catch{}
+  }
+  if(copied){
+    setRemoteScreenStatus("VM text copied to this PC · "+value.length+" chars","ready");
+    closeRemoteClipboardModal();
+  }else{
+    preview.focus();preview.select();
+    setRemoteScreenStatus("Browser blocked clipboard access · text selected, press Ctrl+C here","error");
+  }
+}
+
 async function copyRemoteClipboard(){
+  const button=document.getElementById("remoteClipboardReadButton");
+  if(button?.disabled)return;
+  button.disabled=true;
+  setRemoteScreenStatus("Reading VM clipboard…");
   try{
-    if(!remoteViewOnly){
-      await sendRemoteInput({type:"chord",keys:["Control","c"]},{refresh:false});
-      await new Promise(resolve=>setTimeout(resolve,120));
-    }
-    const data=await api("/vm-desktop/clipboard",{signal:AbortSignal.timeout(8000)});
+    // Fetch only what was already copied within the VM; never send Ctrl+C
+    // (which could overwrite the clipboard and previously caused HTTP 422).
+    const data=await api("/vm-desktop/clipboard",{signal:AbortSignal.timeout(12000)});
+    if(data?.ok===false)throw new Error(data.error||"VM clipboard read failed.");
     const text=String(data?.text||"");
     if(!text){
-      setRemoteScreenStatus("VM clipboard empty");
+      setRemoteScreenStatus("VM clipboard empty · copy text in VM first using Ctrl+C","error");
       return;
     }
-    const copied=await copyTextToLocalClipboard(text);
-    if(!copied){
-      setRemoteScreenStatus("Browser blocked local clipboard","error");
-      return;
-    }
-    const suffix=data?.truncated?" · first 100 KB":"";
-    setRemoteScreenStatus("Copied from VM · "+text.length+" chars"+suffix,"ready");
+    const preview=document.getElementById("remoteClipboardPreview");
+    const info=document.getElementById("remoteClipboardInfo");
+    if(!preview||!info)throw new Error("Clipboard dialog unavailable.");
+    preview.value=text;
+    info.textContent="Read "+text.length+" characters from the VM clipboard"+(data?.truncated?" (first 100 KB only)":"")+
+      ". Press Copy to this PC below. No file transfer.";
+    document.getElementById("remoteClipboardModal").classList.remove("hidden");
+    setRemoteScreenStatus("VM text ready · click Copy to this PC","ready");
   }catch(e){
     setRemoteScreenStatus(e.message||"VM clipboard unavailable","error");
+  }finally{
+    button.disabled=false;
   }
 }
 
@@ -1479,7 +1528,8 @@ function scheduleVmMissionPoll(delay=20000){
     if(vmActivePage!=="agent")return;
     const items=await loadVmMissions().catch(()=>[]);
     const busy=Array.isArray(items)&&items.some(m=>["queued","running","cancelling"].includes(m.status));
-    if(vmActivePage==="agent")scheduleVmMissionPoll(busy?2500:12000);
+    const slowDesktop=busy&&items.some(m=>m.provider==="chatgpt_desktop"&&["queued","running"].includes(m.status));
+    if(vmActivePage==="agent")scheduleVmMissionPoll(busy?(slowDesktop?7500:2500):12000);
   },delay);
 }
 
@@ -1545,7 +1595,7 @@ function vmAgentProviderChanged(){
   const meta=document.getElementById("vmAgentMeta");
   if(!meta)return;
   if(desktop){
-    meta.textContent="Normal ChatGPT Desktop Chat · temporary session · chat-only (no direct VM file tools).";
+    meta.textContent="ChatGPT Desktop · temporary chat · runs as a recoverable background command (up to 30 minutes) · results appear in this chat.";
   }else if(provider==="chatgpt"){
     meta.textContent="Goose is the agent. Its model provider is ChatGPT Codex via your ChatGPT-plan OAuth; this is not normal ChatGPT Chat.";
   }else if(provider==="codex"){
@@ -2125,6 +2175,12 @@ async function runVmAgentTask(){
   const meta=document.getElementById("vmAgentMeta");
   const prompt=input.value.trim();
   if(!prompt)return;
+  // Normal ChatGPT Desktop Chat is often much slower than an HTTP request lifetime.
+  // Use the VM's durable mission queue so results survive browser navigation or connection loss.
+  if(provider==="chatgpt_desktop"){
+    await queueVmCommand();
+    return;
+  }
   if(button.disabled||vmRemoteBusy){queueVmCommand();return;}
 
   const contextPrompt=buildVmAgentPrompt(prompt);
@@ -2569,8 +2625,10 @@ async function queueVmCommand(){
     const items=await loadVmMissions();
     const waiting=items.filter(m=>["queued","running","cancelling"].includes(m.status)).length;
     document.getElementById("vmAgentMeta").textContent=
-      "Command attached to this chat · "+waiting+" queued/running";
-    scheduleVmMissionPoll(1800);
+      provider==="chatgpt_desktop"
+        ?"ChatGPT Desktop running in background · up to 30 minutes · safe to leave this tab; reply is saved to this chat."
+        :"Command attached to this chat · "+waiting+" queued/running";
+    scheduleVmMissionPoll(provider==="chatgpt_desktop"?4000:1800);
   }catch(e){
     document.getElementById("vmAgentMeta").textContent="Could not queue command · "+(e.message||e);
   }finally{

@@ -36,6 +36,9 @@ PROVIDER_SESSION_STATE = Path(os.environ.get("CODEPILOT_PROVIDER_SESSION_STATE",
 WATCHDOG_STATUS_FILE = Path(os.environ.get("CODEPILOT_WATCHDOG_STATUS", "/var/lib/codepilot-watchdog/status.json")).resolve()
 MAX_TURNS = int(os.environ.get("CODEPILOT_MAX_TURNS", "12"))
 TASK_TIMEOUT = int(os.environ.get("CODEPILOT_TASK_TIMEOUT", "300"))
+# Desktop ChatGPT responses can take significantly longer than a browser/Worker request.
+# This limit only applies to the ChatGPT Desktop bridge, not other agents.
+DESKTOP_CHAT_TIMEOUT = max(300, min(3600, int(os.environ.get("CODEPILOT_CHATGPT_DESKTOP_TIMEOUT", "1800"))))
 MISSION_HISTORY = int(os.environ.get("CODEPILOT_MISSION_HISTORY", "50"))
 
 task_lock = asyncio.Lock()
@@ -83,7 +86,7 @@ class DesktopInputRequest(BaseModel):
     deltaY: float = 0
     text: str = Field(default="", max_length=500)
     key: str = Field(default="", max_length=32)
-    keys: list[str] = Field(default_factory=list, max_length=4)
+    keys: list[str] = Field(default_factory=list)
 
 
 def now_iso() -> str:
@@ -618,7 +621,7 @@ def provider_command(req: TaskRequest, full_prompt: str, session_id: Optional[st
             "/usr/bin/python3",
             str(CHATGPT_DESKTOP_BRIDGE),
             "--timeout",
-            str(max(30, min(TASK_TIMEOUT - 10, 240))),
+            str(DESKTOP_CHAT_TIMEOUT),
         ]
     elif req.provider == "codex":
         if session_id:
@@ -869,8 +872,14 @@ async def execute(req: TaskRequest, wait_for_slot: bool = False, mission_id: Opt
             active_task_process = proc
             if mission_id:
                 active_processes[mission_id] = proc
+            # Allow a grace period for bridge startup and result serialization.
+            # Long ChatGPT Desktop chat runs are submitted via persistent missions,
+            # so they do not depend on Cloudflare's ~5-minute request limit.
+            execution_timeout = (
+                DESKTOP_CHAT_TIMEOUT + 90 if req.provider == "chatgpt_desktop" else TASK_TIMEOUT
+            )
             if req.provider == "cursor":
-                await asyncio.wait_for(proc.wait(), timeout=TASK_TIMEOUT)
+                await asyncio.wait_for(proc.wait(), timeout=execution_timeout)
                 stdout_size = os.fstat(cursor_stdout_file.fileno()).st_size
                 stderr_size = os.fstat(cursor_stderr_file.fileno()).st_size
                 stdout = os.pread(cursor_stdout_file.fileno(), stdout_size, 0)
@@ -879,7 +888,7 @@ async def execute(req: TaskRequest, wait_for_slot: bool = False, mission_id: Opt
                 stdin_payload = full_prompt.encode("utf-8") if req.provider == "chatgpt_desktop" else None
                 stdout, stderr = await asyncio.wait_for(
                     proc.communicate(input=stdin_payload),
-                    timeout=TASK_TIMEOUT,
+                    timeout=execution_timeout,
                 )
         except asyncio.TimeoutError:
             if proc:
@@ -898,7 +907,10 @@ async def execute(req: TaskRequest, wait_for_slot: bool = False, mission_id: Opt
                 "completed_at": now_iso(),
                 "duration_seconds": round(time.monotonic() - started_monotonic, 2),
             }
-            raise HTTPException(status_code=504, detail="Remote Worker task timed out")
+            raise HTTPException(status_code=504, detail=(
+                f"ChatGPT Desktop did not finish within {DESKTOP_CHAT_TIMEOUT // 60} minutes"
+                if req.provider == "chatgpt_desktop" else "Remote Worker task timed out"
+            ))
         finally:
             if mission_id:
                 active_processes.pop(mission_id, None)
@@ -1237,6 +1249,7 @@ async def capabilities(authorization: Optional[str] = Header(default=None)):
         "limits": {
             "max_turns": MAX_TURNS,
             "task_timeout_seconds": TASK_TIMEOUT,
+            "chatgpt_desktop_timeout_seconds": DESKTOP_CHAT_TIMEOUT,
             "concurrency": 1,
         },
     }
