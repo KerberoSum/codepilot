@@ -5,6 +5,9 @@ on:
     branches: ["main"]
     paths:
       - "frontend/**"
+      - "package.json"
+      - "package-lock.json"
+      - "tools/**"
       - ".github/workflows/pages.yml"
   workflow_dispatch:
 
@@ -26,6 +29,15 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v6
+
+      - name: Configure Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22.23.4"
+          cache: npm
+
+      - name: Build patched Markdown renderer
+        run: npm ci && npm run build:markdown
 
       - name: Configure GitHub Pages
         uses: actions/configure-pages@v5
