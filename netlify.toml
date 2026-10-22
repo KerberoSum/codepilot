@@ -1,3 +1,7 @@
 [build]
+  command = "npm ci && npm run build:markdown"
   publish = "frontend"
+
+[build.environment]
+  NODE_VERSION = "22.23.4"
 
