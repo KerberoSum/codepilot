@@ -5,6 +5,7 @@ CodePilot's VM Agent can now operate as a small remote worker rather than only a
 ## Core capabilities
 
 - persistent VM Agent chat sessions stored in Cloudflare D1, with new/open/rename/delete controls like Workspace chat
+- ChatGPT Desktop Temporary Chat continuity: reuse the active temporary conversation for the same CodePilot chat, and rebuild context from CodePilot history if the desktop conversation changes or restarts. Temporary Chats are not available in normal ChatGPT history and cannot be reopened once lost. Only one desktop temporary conversation is active at a time.
 - Read-only and Workspace permission modes
 - optional public-web access per chat message or mission
 - background Missions that continue on the VM after the browser disconnects

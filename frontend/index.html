@@ -2069,10 +2069,16 @@ function vmAgentKeydown(e){
 }
 
 function buildVmAgentPrompt(prompt){
-  const prior=vmAgentMessages.slice(-12);
-  const lines=prior.map(m=>(m.role==="user"?"User":"Assistant")+": "+String(m.text||"").slice(0,1100));
+  // Used only when a Temporary Chat must be recreated or another non-native
+  // provider needs conversational context. Continued desktop chats send only
+  // the new turn, because ChatGPT already has the earlier messages.
+  const prior=vmAgentMessages.slice(-24);
+  const lines=prior.map(m=>(m.role==="user"?"User":"Assistant")+": "+String(m.text||"").slice(0,2800));
   let context=lines.join("\n\n");
-  if(context.length>7000)context=context.slice(-7000);
+  // Reserve space for the newest prompt and wrapper: the VM Agent API
+  // accepts at most 16,000 characters in context_prompt.
+  const historyBudget=Math.max(0,15000-prompt.length-160);
+  if(context.length>historyBudget)context=historyBudget?context.slice(-historyBudget):"";
   return context
     ? "Continue this conversation naturally. Use the recent conversation only as context; perform the newest request.\n\nRECENT CONVERSATION:\n"+context+"\n\nNEW USER MESSAGE:\n"+prompt
     : prompt;

@@ -86,7 +86,7 @@ class DesktopInputRequest(BaseModel):
     deltaY: float = 0
     text: str = Field(default="", max_length=500)
     key: str = Field(default="", max_length=32)
-    keys: list[str] = Field(default_factory=list)
+    keys: list[str] = Field(default_factory=list, max_length=4)
 
 
 def now_iso() -> str:
@@ -885,7 +885,14 @@ async def execute(req: TaskRequest, wait_for_slot: bool = False, mission_id: Opt
                 stdout = os.pread(cursor_stdout_file.fileno(), stdout_size, 0)
                 stderr = os.pread(cursor_stderr_file.fileno(), stderr_size, 0)
             else:
-                stdin_payload = full_prompt.encode("utf-8") if req.provider == "chatgpt_desktop" else None
+                stdin_payload = (
+                    json.dumps({
+                        "chat_id": req.chat_id or "",
+                        "first_prompt": full_prompt,
+                        "continuation_prompt": desktop_chat_prompt(req, req.prompt),
+                    }, ensure_ascii=False).encode("utf-8")
+                    if req.provider == "chatgpt_desktop" else None
+                )
                 stdout, stderr = await asyncio.wait_for(
                     proc.communicate(input=stdin_payload),
                     timeout=execution_timeout,
@@ -982,6 +989,7 @@ async def execute(req: TaskRequest, wait_for_slot: bool = False, mission_id: Opt
                     "cost_usd": payload.get("cost_usd"),
                     "inference": payload.get("inference") if isinstance(payload.get("inference"), dict) else {"provider": "chatgpt_desktop", "requestedModel": model_name},
                     "status": str(payload.get("status") or "completed"),
+                    "conversation": payload.get("conversation") if isinstance(payload.get("conversation"), dict) else None,
                 }
             elif req.provider in {"chatgpt", "openrouter", "gemini"}:
                 try:

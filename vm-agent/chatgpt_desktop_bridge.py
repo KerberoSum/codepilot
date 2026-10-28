@@ -4,6 +4,7 @@ import base64
 import hashlib
 import json
 import os
+from pathlib import Path
 import re
 import socket
 import struct
@@ -14,6 +15,7 @@ import urllib.request
 
 CDP_LIST_URL = os.environ.get("CHATGPT_DESKTOP_CDP_LIST", "http://127.0.0.1:9223/json/list")
 TARGET_URL = "app://-/index.html"
+SESSION_STATE_PATH = Path(os.environ.get("CODEPILOT_CHATGPT_TEMP_STATE", "/srv/codepilot-agent/chatgpt-temp-session.json"))
 WS_GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
 
 
@@ -338,6 +340,56 @@ def start_clean_temporary_chat(cdp: CDP):
     if not ok:
         raise RuntimeError("ChatGPT Desktop could not enter Temporary chat")
 
+def read_session_state():
+    """Persist only thread identity and response digest, never full chat content."""
+    try:
+        data = json.loads(SESSION_STATE_PATH.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def answer_digest(answer: str) -> str:
+    return hashlib.sha256(answer.strip().encode("utf-8")).hexdigest()
+
+
+def can_resume_temporary_chat(cdp: CDP, target: dict, chat_id: str, state: dict) -> bool:
+    """A temporary chat has no reliable history URL; verify the visible last reply."""
+    if not chat_id or state.get("chat_id") != chat_id or state.get("target_id") != target.get("id"):
+        return False
+    expected = state.get("last_answer_digest")
+    if not isinstance(expected, str) or len(expected) != 64:
+        return False
+    try:
+        nodes, all_nodes = visible_nodes(cdp)
+        if not any(role(n) == "button" and name(n) == "Turn off temporary chat" for n in nodes):
+            return False
+        if any(role(n) == "button" and name(n).lower().startswith("stop generating") for n in nodes):
+            return False
+        previous = latest_answer(all_nodes)
+        return bool(previous) and answer_digest(previous) == expected
+    except Exception:
+        return False
+
+
+def save_session_state(chat_id: str, target: dict, answer: str):
+    if not chat_id:
+        return
+    SESSION_STATE_PATH.parent.mkdir(parents=True, exist_ok=True)
+    state = {
+        "chat_id": chat_id,
+        "target_id": target.get("id"),
+        "last_answer_digest": answer_digest(answer),
+    }
+    pending = SESSION_STATE_PATH.with_suffix(".tmp")
+    try:
+        with pending.open("w", encoding="utf-8") as output:
+            os.chmod(pending, 0o600)
+            json.dump(state, output, ensure_ascii=False)
+        pending.replace(SESSION_STATE_PATH)
+    finally:
+        pending.unlink(missing_ok=True)
+
 
 def focus_composer(cdp: CDP):
     nodes, _ = visible_nodes(cdp)
@@ -495,7 +547,14 @@ def latest_answer(all_nodes):
     return subtree_plain_text(all_nodes, answer_root.get("nodeId"))
 
 
-def wait_for_answer(cdp: CDP, timeout: float):
+def assistant_reply_count(all_nodes):
+    return sum(
+        1 for node in all_nodes
+        if not node.get("ignored") and role(node) == "StaticText" and name(node) == "ChatGPT said:"
+    )
+
+
+def wait_for_answer(cdp: CDP, timeout: float, baseline_reply_count: int = 0):
     deadline = time.monotonic() + timeout
     previous = ""
     stable = 0
@@ -503,6 +562,12 @@ def wait_for_answer(cdp: CDP, timeout: float):
     still_generating = False
     while time.monotonic() < deadline:
         nodes, all_nodes = visible_nodes(cdp)
+        # Continued chats already have a complete previous assistant reply.
+        # Ignore it until the next assistant turn appears, otherwise the
+        # bridge would instantly return the old answer as the new response.
+        if assistant_reply_count(all_nodes) <= baseline_reply_count:
+            time.sleep(0.65)
+            continue
         answer = latest_answer(all_nodes)
         if answer:
             latest = answer
@@ -528,15 +593,29 @@ def wait_for_answer(cdp: CDP, timeout: float):
     )
 
 
-def run(prompt: str, timeout: float):
+def run(first_prompt: str, continuation_prompt: str, timeout: float, chat_id: str = ""):
     target = main_target()
     cdp = CDP(target["webSocketDebuggerUrl"])
     try:
         cdp.call("Accessibility.enable")
         cdp.call("DOM.enable")
-        start_clean_temporary_chat(cdp)
-        send_prompt(cdp, prompt)
-        return wait_for_answer(cdp, timeout)
+        state = read_session_state()
+        continued = can_resume_temporary_chat(cdp, target, chat_id, state)
+        if not continued:
+            start_clean_temporary_chat(cdp)
+        # A continued chat already contains the earlier messages. A recovered
+        # chat instead gets the context reconstructed by CodePilot.
+        _, before_nodes = visible_nodes(cdp)
+        baseline_reply_count = assistant_reply_count(before_nodes)
+        send_prompt(cdp, continuation_prompt if continued else first_prompt)
+        answer = wait_for_answer(cdp, timeout, baseline_reply_count)
+        try:
+            save_session_state(chat_id, target, answer)
+        except OSError as exc:
+            # A read-only or full state directory should not discard a valid
+            # ChatGPT response. The next request can rebuild from saved history.
+            print(f"ChatGPT Desktop session state could not be saved: {exc}", file=sys.stderr)
+        return answer, ("continued" if continued else "recovered" if chat_id and state.get("chat_id") == chat_id else "new")
     finally:
         cdp.close()
 
@@ -562,13 +641,29 @@ def main():
         if args.check:
             print(json.dumps(check(), ensure_ascii=False))
             return 0
-        prompt = sys.stdin.read()
-        if not prompt.strip():
+        raw_prompt = sys.stdin.read()
+        if not raw_prompt.strip():
             raise RuntimeError("No prompt was provided on stdin")
-        result = run(prompt, args.timeout)
+        # Structured input preserves both context recovery and lightweight
+        # follow-ups. Plain-text stdin remains supported for older callers.
+        try:
+            request = json.loads(raw_prompt)
+        except ValueError:
+            request = None
+        if isinstance(request, dict) and "first_prompt" in request and "continuation_prompt" in request:
+            first_prompt = str(request["first_prompt"])
+            continuation_prompt = str(request["continuation_prompt"])
+            chat_id = str(request.get("chat_id") or "")[:128]
+        else:
+            first_prompt = continuation_prompt = raw_prompt
+            chat_id = ""
+        if not first_prompt.strip() or not continuation_prompt.strip():
+            raise RuntimeError("A ChatGPT Desktop prompt is empty")
+        result, conversation_mode = run(first_prompt, continuation_prompt, args.timeout, chat_id)
         print(json.dumps({
             "ok": True,
             "result": result,
+            "conversation": {"mode": conversation_mode, "temporary": True},
             "tokens": {"total": None, "input": None, "output": None},
             "cost_usd": None,
             "inference": {"provider": "chatgpt_desktop", "requestedModel": "ChatGPT Desktop · Chat"},
