@@ -633,6 +633,7 @@ body.auth-locked #authModal{display:grid!important;background:var(--bg)}
         <option value="high">High quality</option>
       </select>
       <button id="remoteViewOnlyButton" class="agent-secondary" onclick="toggleRemoteViewOnly()">Control</button>
+      <button id="remoteDoubleClickButton" class="agent-secondary" onclick="armRemoteDoubleClick()" title="Double-click the next location you select on the VM desktop, even if your browser only recognizes one click">Double-click next</button>
       <button class="agent-secondary" onclick="toggleRemoteFullscreen()">Fullscreen</button>
       <button class="agent-secondary" onclick="setRemoteZoom(remoteZoom-.15)">−</button>
       <button id="remoteZoomLabel" class="agent-secondary" onclick="setRemoteZoom(1)">100%</button>
@@ -655,14 +656,14 @@ body.auth-locked #authModal{display:grid!important;background:var(--bg)}
       onpointerdown="remotePointerDown(event)"
       onpointermove="remotePointerMove(event)"
       onpointerup="remotePointerUp(event)"
-      onpointercancel="remotePointerUp(event)"
+      onpointercancel="remotePointerCancel(event)"
       ondblclick="remoteDoubleClick(event)"
       oncontextmenu="event.preventDefault()"
       onwheel="remoteWheel(event)">
       <div id="remoteScreenPlaceholder" class="remote-placeholder">Loading VM desktop…</div>
       <img id="remoteScreenImage" class="remote-screen hidden" alt="VM desktop" draggable="false">
     </div>
-    <div class="remote-note">Auto mode tries WebSocket Turbo first, then falls back to authenticated HTTPS when blocked. Keyboard focus on the remote screen supports Shift+Enter for a new line in ChatGPT Desktop. Screen updates pause automatically while this browser tab is hidden and resume when you return.</div>
+    <div class="remote-note">Click an application icon twice to open it, or select “Double-click next” and then click the icon once. Input is sent in order, with acknowledgment in Turbo mode. If controls do not respond, select HTTPS Compatible. Keyboard focus on the remote screen supports Shift+Enter. Screen updates pause when this tab is hidden.</div>
   </div>
 </section>
 
@@ -793,6 +794,8 @@ let vmTimelineOpen=false;
 let vmCapabilitiesCache=null;
 let terminalCwd="/srv/codepilot-workspace", terminalHistory=[], terminalHistoryIndex=0;
 let remoteScreenTimer=null, remoteScreenBusy=false, remoteScreenObjectUrl="", remotePointerActive=false, remoteMoveTimer=null, remotePendingMove=null;
+let remotePointerStart=null, remotePointerLast=null, remotePointerDrag=false, remotePointerButton=1;
+let remotePendingClick=null, remoteDoubleClickArmed=false, remoteInputQueue=Promise.resolve(), remoteInputAck=null;
 let remoteViewOnly=false, remoteZoom=1, remoteQualityMode="auto", remoteLastInteraction=0, remoteLastFrameMs=0;
 let remoteSocket=null, remoteSocketConnectTimer=null, remoteSocketFramePending=false, remoteSocketClosing=false;
 let remoteTransportMode="auto", remoteTurboActive=false, remoteTurboFailed=false, remoteTurboFrameStarted=0, remoteTurboMeta=null;
@@ -899,7 +902,22 @@ function setRemoteScreenStatus(text,state=""){
   el.textContent=text;el.title=text;el.className="remote-status"+(state?" "+state:"");
 }
 
+function settleRemoteInputAck(error=null){
+  const pending=remoteInputAck;
+  if(!pending)return;
+  remoteInputAck=null;
+  clearTimeout(pending.timer);
+  if(error)pending.reject(error);
+  else pending.resolve();
+}
+
+function cancelRemotePendingClick(){
+  if(remotePendingClick)clearTimeout(remotePendingClick.timer);
+  remotePendingClick=null;
+}
+
 function closeRemoteSocket(){
+  settleRemoteInputAck(new Error("Turbo input connection closed"));
   clearTimeout(remoteSocketConnectTimer);remoteSocketConnectTimer=null;
   const socket=remoteSocket;
   remoteSocket=null;remoteTurboActive=false;remoteSocketFramePending=false;remoteTurboMeta=null;
@@ -913,8 +931,10 @@ function closeRemoteSocket(){
 
 function stopRemoteScreen(){
   clearTimeout(remoteScreenTimer);remoteScreenTimer=null;
-  remoteScreenBusy=false;remotePointerActive=false;remotePendingMove=null;
+  remoteScreenBusy=false;remotePointerActive=false;remotePointerDrag=false;
+  remotePointerStart=null;remotePointerLast=null;remotePendingMove=null;
   clearTimeout(remoteMoveTimer);remoteMoveTimer=null;
+  cancelRemotePendingClick();resetRemoteDoubleClickArm();
   closeRemoteSocket();
   if(remoteScreenObjectUrl){
     URL.revokeObjectURL(remoteScreenObjectUrl);
@@ -931,7 +951,9 @@ function handleRemoteVisibilityChange(){
   if(document.hidden){
     clearTimeout(remoteScreenTimer);remoteScreenTimer=null;
     clearTimeout(remoteMoveTimer);remoteMoveTimer=null;
-    remotePendingMove=null;remotePointerActive=false;
+    remotePendingMove=null;remotePointerActive=false;remotePointerDrag=false;
+    remotePointerStart=null;remotePointerLast=null;
+    cancelRemotePendingClick();resetRemoteDoubleClickArm();
     closeRemoteSocket();
     setRemoteScreenStatus("Paused · tab hidden");
     return;
@@ -1025,13 +1047,16 @@ function connectRemoteSocket(){
     if(remoteSocket!==socket)return;
     if(typeof event.data==="string"){
       let msg={};try{msg=JSON.parse(event.data)}catch{return}
-      if(msg.type==="ready"){
+      if(msg.type==="input_ack"){
+        settleRemoteInputAck(msg.ok===false?new Error("Turbo input was rejected"):null);
+      }else if(msg.type==="ready"){
         remoteTurboActive=true;
 
         setRemoteScreenStatus("Turbo ready","ready");
       }else if(msg.type==="frame_meta"){
         remoteTurboMeta=msg;
       }else if(msg.type==="error"){
+        settleRemoteInputAck(new Error(msg.error||"Turbo input failed"));
         remoteSocketFramePending=false;
         setRemoteScreenStatus("Turbo · "+(msg.error||"request failed"),"error");
         scheduleRemoteScreen(900);
@@ -1056,8 +1081,9 @@ function connectRemoteSocket(){
     }
   };
 
-  socket.onerror=()=>{};
+  socket.onerror=()=>{settleRemoteInputAck(new Error("Turbo socket error"));};
   socket.onclose=()=>{
+    settleRemoteInputAck(new Error("Turbo socket disconnected"));
     const intentional=socket.codepilotIntentional===true;
     if(remoteSocket===socket){
       remoteSocket=null;remoteTurboActive=false;remoteSocketFramePending=false;
@@ -1280,21 +1306,32 @@ async function refreshRemoteScreen(force=false){
   }
 }
 
-async function sendRemoteInput(payload,{refresh=true}={}){
-  if(remoteViewOnly){setRemoteScreenStatus("View only · input blocked","error");return null;}
-  markRemoteInteraction();
-
+async function sendRemoteInputNow(payload,{refresh=true}={}){
   const socket=remoteSocket;
   if(remoteTurboActive&&socket?.readyState===WebSocket.OPEN){
     try{
-      socket.send(JSON.stringify({type:"input",payload}));
+      // The VM Worker acknowledges every input. Wait for that response so
+      // keyboard events, clicks and mouse releases cannot overtake each other.
+      await new Promise((resolve,reject)=>{
+        const pending={resolve,reject,timer:null};
+        remoteInputAck=pending;
+        pending.timer=setTimeout(()=>{
+          if(remoteInputAck===pending)settleRemoteInputAck(new Error("Turbo input acknowledgment timed out"));
+        },7000);
+        try{socket.send(JSON.stringify({type:"input",payload}));}
+        catch(e){settleRemoteInputAck(e);}
+      });
       if(refresh&&vmActivePage==="remote"){
         clearTimeout(remoteScreenTimer);
         remoteScreenTimer=setTimeout(()=>requestRemoteTurboFrame(true),70);
       }
       return {ok:true,transport:"websocket"};
     }catch(e){
-      fallbackRemoteToHttps("Turbo input failed");
+      // Do not automatically replay the action: it might already have
+      // reached the VM, which could accidentally double-click or type twice.
+      fallbackRemoteToHttps("Turbo controls not responding");
+      setRemoteScreenStatus("Turbo control failed · HTTPS enabled · retry your action","error");
+      return null;
     }
   }
 
@@ -1305,18 +1342,31 @@ async function sendRemoteInput(payload,{refresh=true}={}){
       body:JSON.stringify(payload),
       signal:AbortSignal.timeout(10000)
     });
-    let d={};try{d=await r.json()}catch{}
+    let result={};try{result=await r.json()}catch{}
     if(r.status===401){clearAuthToken();showLogin();throw new Error("CodePilot session expired.");}
-    if(!r.ok||d.ok===false)throw new Error(d.error||d.detail||("Input HTTP "+r.status));
+    if(!r.ok||result.ok===false)throw new Error(result.error||result.detail||("Input HTTP "+r.status));
     if(refresh&&vmActivePage==="remote"){
       clearTimeout(remoteScreenTimer);
       remoteScreenTimer=setTimeout(()=>refreshRemoteScreen(true),120);
     }
-    return d;
+    return result;
   }catch(e){
     setRemoteScreenStatus(e.message||"Input failed","error");
     return null;
   }
+}
+
+function sendRemoteInput(payload,options={}){
+  if(remoteViewOnly){
+    setRemoteScreenStatus("View only · input blocked","error");
+    return Promise.resolve(null);
+  }
+  markRemoteInteraction();
+  // Serializes HTTPS as well as Turbo requests, including key chords and
+  // drag mouse-up, which previously raced ahead of mouse-down.
+  const request=remoteInputQueue.then(()=>sendRemoteInputNow(payload,options));
+  remoteInputQueue=request.then(()=>{},()=>{});
+  return request;
 }
 
 function remotePoint(e){
@@ -1329,44 +1379,114 @@ function remotePoint(e){
 }
 
 function remoteButton(e){return e.button===2?3:e.button===1?2:1;}
+function remotePointDistance(a,b){
+  return !a||!b?Infinity:Math.hypot((a.x-b.x)*1440,(a.y-b.y)*900);
+}
+function armRemoteDoubleClick(){
+  if(remoteViewOnly)return setRemoteScreenStatus("Enable Control first","error");
+  remoteDoubleClickArmed=!remoteDoubleClickArmed;
+  const button=document.getElementById("remoteDoubleClickButton");
+  if(button)button.textContent=remoteDoubleClickArmed?"Cancel double-click":"Double-click next";
+  setRemoteScreenStatus(remoteDoubleClickArmed?"Double-click ready · click the target once":"Normal click mode","ready");
+}
+function resetRemoteDoubleClickArm(){
+  remoteDoubleClickArmed=false;
+  const button=document.getElementById("remoteDoubleClickButton");
+  if(button)button.textContent="Double-click next";
+}
+function flushRemotePendingClick(){
+  const pending=remotePendingClick;
+  if(!pending)return;
+  cancelRemotePendingClick();
+  sendRemoteInput({type:"click",...pending.point,button:pending.button});
+}
+function remoteQueueClick(point,button){
+  if(remoteDoubleClickArmed){
+    cancelRemotePendingClick();
+    resetRemoteDoubleClickArm();
+    sendRemoteInput({type:"double_click",...point,button});
+    return;
+  }
+  if(button!==1){
+    flushRemotePendingClick();
+    sendRemoteInput({type:"click",...point,button});
+    return;
+  }
+  const previous=remotePendingClick;
+  if(previous&&Date.now()-previous.at<=450&&
+     previous.button===button&&remotePointDistance(previous.point,point)<=12){
+    cancelRemotePendingClick();
+    sendRemoteInput({type:"double_click",...point,button});
+    return;
+  }
+  flushRemotePendingClick();
+  const pending={point,button,at:Date.now(),timer:null};
+  pending.timer=setTimeout(()=>{
+    if(remotePendingClick!==pending)return;
+    remotePendingClick=null;
+    sendRemoteInput({type:"click",...pending.point,button:pending.button});
+  },450);
+  remotePendingClick=pending;
+}
 
 function remotePointerDown(e){
   if(remoteViewOnly)return;
-  const p=remotePoint(e);if(!p)return;
-  e.preventDefault();document.getElementById("remoteStage")?.focus();
+  const point=remotePoint(e);if(!point)return;
+  e.preventDefault();
+  document.getElementById("remoteStage")?.focus();
   remotePointerActive=true;
+  remotePointerDrag=false;
+  remotePointerStart=point;
+  remotePointerLast=point;
+  remotePointerButton=remoteButton(e);
   try{e.currentTarget.setPointerCapture(e.pointerId)}catch{}
-  sendRemoteInput({type:"mouse_down",...p,button:remoteButton(e)},{refresh:false});
+  // Do not transmit mouse-down until an actual drag starts. Ordinary taps
+  // become one atomic click, preventing release-before-press races over HTTP.
 }
-
 function remotePointerMove(e){
   if(!remotePointerActive)return;
-  const p=remotePoint(e);if(!p)return;
-  remotePendingMove=p;
+  const point=remotePoint(e);if(!point)return;
+  remotePointerLast=point;
+  if(!remotePointerDrag){
+    if(remotePointDistance(remotePointerStart,point)<9)return;
+    remotePointerDrag=true;
+    cancelRemotePendingClick();
+    sendRemoteInput({type:"mouse_down",...remotePointerStart,button:remotePointerButton},{refresh:false});
+  }
+  remotePendingMove=point;
   if(remoteMoveTimer)return;
   remoteMoveTimer=setTimeout(()=>{
     remoteMoveTimer=null;
     const move=remotePendingMove;remotePendingMove=null;
-    if(move)sendRemoteInput({type:"move",...move},{refresh:false});
+    if(remotePointerDrag&&move)sendRemoteInput({type:"move",...move},{refresh:false});
   },remoteTurboActive?35:65);
 }
-
 function remotePointerUp(e){
   if(!remotePointerActive)return;
-  const p=remotePoint(e)||remotePendingMove;
-  remotePointerActive=false;remotePendingMove=null;
-  clearTimeout(remoteMoveTimer);remoteMoveTimer=null;
+  const point=remotePoint(e)||remotePointerLast||remotePointerStart;
+  const dragging=remotePointerDrag,button=remotePointerButton;
+  remotePointerActive=false;remotePointerDrag=false;remotePointerStart=null;remotePointerLast=null;
+  remotePendingMove=null;clearTimeout(remoteMoveTimer);remoteMoveTimer=null;
   try{e.currentTarget.releasePointerCapture(e.pointerId)}catch{}
-  if(p)sendRemoteInput({type:"mouse_up",...p,button:remoteButton(e)});
+  if(!point)return;
+  if(dragging){
+    sendRemoteInput({type:"move",...point},{refresh:false});
+    sendRemoteInput({type:"mouse_up",...point,button});
+  }else remoteQueueClick(point,button);
 }
-
+function remotePointerCancel(e){
+  if(!remotePointerActive)return;
+  const point=remotePointerLast||remotePointerStart;
+  const dragging=remotePointerDrag,button=remotePointerButton;
+  remotePointerActive=false;remotePointerDrag=false;remotePointerStart=null;remotePointerLast=null;
+  remotePendingMove=null;clearTimeout(remoteMoveTimer);remoteMoveTimer=null;
+  try{e.currentTarget.releasePointerCapture(e.pointerId)}catch{}
+  if(dragging&&point)sendRemoteInput({type:"mouse_up",...point,button});
+}
 function remoteDoubleClick(e){
-  if(remoteViewOnly)return;
-  const p=remotePoint(e);if(!p)return;
+  // The second pointer-up already emits a single atomic double_click.
+  // Never replay the two preceding clicks a second time.
   e.preventDefault();
-  remotePointerActive=false;remotePendingMove=null;
-  clearTimeout(remoteMoveTimer);remoteMoveTimer=null;
-  sendRemoteInput({type:"double_click",...p,button:remoteButton(e)});
 }
 
 function remoteWheel(e){
@@ -1377,7 +1497,10 @@ function remoteWheel(e){
   sendRemoteInput({type:"wheel",deltaY:e.deltaY});
 }
 
-function sendRemoteKey(key){return sendRemoteInput({type:"key",key});}
+function sendRemoteKey(key){
+  flushRemotePendingClick();
+  return sendRemoteInput({type:"key",key});
+}
 function normalizeRemoteChordKeys(keys){
   const x11Keysyms={
     Enter:0xff0d,Backspace:0xff08,Tab:0xff09,Escape:0xff1b,
@@ -1390,7 +1513,10 @@ function normalizeRemoteChordKeys(keys){
     return keysym?String.fromCodePoint(keysym):name;
   });
 }
-function sendRemoteChord(keys){return sendRemoteInput({type:"chord",keys:normalizeRemoteChordKeys(keys)});}
+function sendRemoteChord(keys){
+  flushRemotePendingClick();
+  return sendRemoteInput({type:"chord",keys:normalizeRemoteChordKeys(keys)});
+}
 
 async function sendRemoteText({focus=true}={}){
   const input=document.getElementById("remoteTextInput");if(!input)return null;
@@ -1417,6 +1543,8 @@ async function remoteTextKeydown(e){
 function remoteStageKeydown(e){
   if(vmActivePage!=="remote"||remoteViewOnly)return;
   if(["Shift","Control","Alt","Meta"].includes(e.key))return;
+  // A quick click followed by Enter must select the icon before pressing Enter.
+  flushRemotePendingClick();
   if(e.key==="Enter"&&e.shiftKey&&!e.ctrlKey&&!e.metaKey&&!e.altKey){
     e.preventDefault();sendRemoteChord(["Shift","Enter"]);return;
   }
