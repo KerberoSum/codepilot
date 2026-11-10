@@ -206,7 +206,8 @@ body.auth-locked #authModal{display:grid!important;background:var(--bg)}
 .remote-body{flex:1;min-height:0;display:flex;flex-direction:column;background:#05070a}
 .remote-toolbar{min-height:42px;display:flex;align-items:center;gap:8px;padding:7px 12px;border-bottom:1px solid var(--border);background:var(--panel);flex-wrap:wrap}
 .remote-toolbar .remote-status{font-size:9px;color:var(--muted);flex:0 0 150px;width:150px;max-width:150px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.remote-toolbar .remote-status.ready{color:var(--green)}.remote-toolbar .remote-status.error{color:var(--red)}
-.remote-stage{flex:1;min-height:0;overflow:auto;display:flex;align-items:flex-start;justify-content:center;background:#020305;outline:none;touch-action:none;user-select:none}
+.remote-stage{position:relative;flex:1;min-height:0;overflow:auto;display:flex;align-items:flex-start;justify-content:center;background:#020305;outline:none;touch-action:none;user-select:none}
+.remote-ime-proxy{position:absolute;left:8px;top:8px;width:2px;height:2px;opacity:.01;pointer-events:none;z-index:1;padding:0;border:0;resize:none;overflow:hidden;white-space:pre;font-size:16px}
 .remote-stage:focus{box-shadow:inset 0 0 0 1px rgba(116,87,255,.55)}
 .remote-stage.view-only .remote-screen{cursor:not-allowed;opacity:.94}
 .remote-screen{display:block;max-width:100%;height:auto;cursor:default;user-select:none;-webkit-user-drag:none}
@@ -648,7 +649,7 @@ body.auth-locked #authModal{display:grid!important;background:var(--bg)}
       <button class="agent-secondary" onclick="sendRemoteChord(['Control','c'])">Ctrl+C</button>
       <button id="remoteClipboardReadButton" class="agent-secondary" onclick="copyRemoteClipboard()" title="Read text currently in the VM clipboard; no keystrokes or files are transferred">Copy from VM</button>
       <button class="agent-secondary" onclick="pasteRemoteClipboard()">Paste local</button>
-      <input id="remoteTextInput" class="remote-text-input" placeholder="Type text here, then Send" onkeydown="remoteTextKeydown(event)">
+      <input id="remoteTextInput" class="remote-text-input" placeholder="輸入繁體中文或 English，然後 Send text" onkeydown="remoteTextKeydown(event)" oncompositionend="remoteTextCompositionEnd()">
       <button class="agent-secondary" onclick="sendRemoteText()">Send text</button>
     </div>
     <div id="remoteStage" class="remote-stage" tabindex="0"
@@ -660,10 +661,11 @@ body.auth-locked #authModal{display:grid!important;background:var(--bg)}
       ondblclick="remoteDoubleClick(event)"
       oncontextmenu="event.preventDefault()"
       onwheel="remoteWheel(event)">
+      <textarea id="remoteKeyboardProxy" class="remote-ime-proxy" aria-label="Remote keyboard input: supports Traditional Chinese IME" spellcheck="false" autocomplete="off" autocapitalize="off" onkeydown="remoteProxyKeydown(event)" oninput="remoteProxyInput(event)" oncompositionstart="remoteProxyCompositionStart(event)" oncompositionend="remoteProxyCompositionEnd(event)"></textarea>
       <div id="remoteScreenPlaceholder" class="remote-placeholder">Loading VM desktop…</div>
       <img id="remoteScreenImage" class="remote-screen hidden" alt="VM desktop" draggable="false">
     </div>
-    <div class="remote-note">Click an application icon twice to open it, or select “Double-click next” and then click the icon once. Input is sent in order, with acknowledgment in Turbo mode. If controls do not respond, select HTTPS Compatible. Keyboard focus on the remote screen supports Shift+Enter. Screen updates pause when this tab is hidden.</div>
+    <div class="remote-note">Click the VM screen, then type normally using your browser's Traditional Chinese IME (繁體中文) or English. “Send text” and “Paste local” also support Unicode. Select “Double-click next” and click an application icon once. For input issues, choose HTTPS Compatible.</div>
   </div>
 </section>
 
@@ -796,6 +798,7 @@ let terminalCwd="/srv/codepilot-workspace", terminalHistory=[], terminalHistoryI
 let remoteScreenTimer=null, remoteScreenBusy=false, remoteScreenObjectUrl="", remotePointerActive=false, remoteMoveTimer=null, remotePendingMove=null;
 let remotePointerStart=null, remotePointerLast=null, remotePointerDrag=false, remotePointerButton=1;
 let remotePendingClick=null, remoteDoubleClickArmed=false, remoteInputQueue=Promise.resolve(), remoteInputAck=null;
+let remoteProxyComposing=false, remoteProxyCompositionEndedAt=0, remoteTextCompositionEndedAt=0;
 let remoteViewOnly=false, remoteZoom=1, remoteQualityMode="auto", remoteLastInteraction=0, remoteLastFrameMs=0;
 let remoteSocket=null, remoteSocketConnectTimer=null, remoteSocketFramePending=false, remoteSocketClosing=false;
 let remoteTransportMode="auto", remoteTurboActive=false, remoteTurboFailed=false, remoteTurboFrameStarted=0, remoteTurboMeta=null;
@@ -1228,10 +1231,8 @@ async function pasteRemoteClipboard(){
   try{
     const text=await navigator.clipboard.readText();
     if(!text)return;
-    const chunks=text.slice(0,2000).match(/[\s\S]{1,450}/g)||[];
-    for(const chunk of chunks)await sendRemoteInput({type:"text",text:chunk},{refresh:false});
-    markRemoteInteraction();
-    scheduleRemoteScreen(120);
+    const result=await sendRemoteUnicodeText(text);
+    if(!result)throw new Error("Paste to VM failed");
   }catch(e){
     setRemoteScreenStatus("Clipboard unavailable · use the text box instead","error");
   }
@@ -1433,7 +1434,7 @@ function remotePointerDown(e){
   if(remoteViewOnly)return;
   const point=remotePoint(e);if(!point)return;
   e.preventDefault();
-  document.getElementById("remoteStage")?.focus();
+  focusRemoteKeyboard(e);
   remotePointerActive=true;
   remotePointerDrag=false;
   remotePointerStart=point;
@@ -1518,23 +1519,87 @@ function sendRemoteChord(keys){
   return sendRemoteInput({type:"chord",keys:normalizeRemoteChordKeys(keys)});
 }
 
+async function sendRemoteUnicodeText(text){
+  // Split on Unicode code points: never divide a surrogate pair or exceed
+  // the VM Agent's 500-character DesktopInputRequest limit.
+  const chars=Array.from(String(text||""));
+  if(!chars.length)return {ok:true};
+  flushRemotePendingClick();
+  for(let i=0;i<chars.length;i+=400){
+    const result=await sendRemoteInput({
+      type:"text",text:chars.slice(i,i+400).join("")
+    },{refresh:false});
+    if(!result||result.ok===false)return null;
+  }
+  scheduleRemoteScreen(120);
+  return {ok:true};
+}
+
+function focusRemoteKeyboard(e){
+  const proxy=document.getElementById("remoteKeyboardProxy");
+  if(!proxy)return document.getElementById("remoteStage")?.focus();
+  // IME candidates appear close to the user's click, not at screen origin.
+  if(e){
+    const stage=document.getElementById("remoteStage");
+    const rect=stage?.getBoundingClientRect();
+    if(rect){
+      proxy.style.left=Math.max(0,e.clientX-rect.left+(stage.scrollLeft||0))+"px";
+      proxy.style.top=Math.max(0,e.clientY-rect.top+(stage.scrollTop||0))+"px";
+    }
+  }
+  proxy.focus({preventScroll:true});
+}
+
+function remoteProxyCompositionStart(){
+  remoteProxyComposing=true;
+}
+function remoteProxyCompositionEnd(e){
+  remoteProxyComposing=false;
+  remoteProxyCompositionEndedAt=Date.now();
+  // Browsers differ on whether the final input event comes just before or
+  // just after compositionend. Flush on the next event loop exactly once.
+  setTimeout(()=>remoteProxyInput(e),0);
+}
+function remoteProxyInput(e){
+  const proxy=e?.currentTarget||document.getElementById("remoteKeyboardProxy");
+  if(!proxy||remoteProxyComposing||e?.isComposing)return;
+  const text=proxy.value;
+  if(!text)return;
+  proxy.value="";
+  sendRemoteUnicodeText(text);
+}
+function remoteProxyKeydown(e){
+  e.stopPropagation();
+  if(remoteProxyComposing||e.isComposing||e.keyCode===229||e.key==="Process")return;
+  if(e.key==="Enter"&&Date.now()-remoteProxyCompositionEndedAt<100){
+    e.preventDefault();return;
+  }
+  // Input events carry committed Unicode/ASCII text; forwarding keydown too
+  // would duplicate the characters, especially for Chinese IMEs.
+  if(e.key.length===1&&!e.altKey&&!e.ctrlKey&&!e.metaKey)return;
+  if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==="v"){
+    // Let the browser paste into the IME proxy; oninput forwards the UTF-8.
+    return;
+  }
+  remoteStageKeydown(e);
+}
+
 async function sendRemoteText({focus=true}={}){
   const input=document.getElementById("remoteTextInput");if(!input)return null;
   const text=input.value;if(!text)return null;
-  input.value="";
-  const result=await sendRemoteInput({type:"text",text},{refresh:false});
-  if(focus)setTimeout(()=>document.getElementById("remoteStage")?.focus(),20);
-  else scheduleRemoteScreen(120);
+  const result=await sendRemoteUnicodeText(text);
+  if(result?.ok&&input.value===text)input.value="";
+  if(focus&&result?.ok)setTimeout(()=>focusRemoteKeyboard(),20);
   return result;
 }
-
+function remoteTextCompositionEnd(){remoteTextCompositionEndedAt=Date.now();}
 async function remoteTextKeydown(e){
-  if(e.key!=="Enter"||e.isComposing)return;
+  if(e.key!=="Enter"||e.isComposing||e.keyCode===229||
+    Date.now()-remoteTextCompositionEndedAt<100)return;
   e.preventDefault();
   if(e.shiftKey){
-    await sendRemoteText({focus:false});
-    await sendRemoteChord(["Shift","Enter"]);
-    setTimeout(()=>document.getElementById("remoteStage")?.focus(),20);
+    const sent=await sendRemoteText({focus:false});
+    if(sent?.ok)await sendRemoteChord(["Shift","Enter"]);
     return;
   }
   await sendRemoteText();
@@ -1561,7 +1626,7 @@ function remoteStageKeydown(e){
     return;
   }
   if(e.key.length===1){
-    e.preventDefault();sendRemoteInput({type:"text",text:e.key});return;
+    e.preventDefault();sendRemoteUnicodeText(e.key);return;
   }
   if(["Enter","Backspace","Tab","Escape","ArrowLeft","ArrowRight","ArrowUp","ArrowDown","Delete","Home","End","PageUp","PageDown"].includes(e.key)){
     e.preventDefault();sendRemoteKey(e.key);

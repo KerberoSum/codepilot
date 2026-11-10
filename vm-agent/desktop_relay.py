@@ -3,6 +3,7 @@ import ctypes
 import io
 import json
 import os
+import re
 import subprocess
 import tempfile
 import threading
@@ -122,6 +123,86 @@ def type_ascii(d, text):
         XTST.XTestFakeKeyEvent(d, code, 0, 0)
         if shifted:
             XTST.XTestFakeKeyEvent(d, shift_code, 0, 0)
+
+def active_terminal_window():
+    """Detect common Linux terminal windows that use Ctrl+Shift+V for paste."""
+    try:
+        focused = subprocess.run(
+            ["/usr/bin/xprop", "-root", "_NET_ACTIVE_WINDOW"],
+            env=ENV, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+            timeout=1, check=False,
+        )
+        match = re.search(rb"0x[0-9a-fA-F]+", focused.stdout)
+        if not match:
+            return False
+        klass = subprocess.run(
+            ["/usr/bin/xprop", "-id", match.group().decode("ascii"), "WM_CLASS"],
+            env=ENV, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+            timeout=1, check=False,
+        )
+        wm_class = klass.stdout.lower()
+        return any(name in wm_class for name in (
+            b"gnome-terminal", b"xfce4-terminal", b"terminator",
+            b"tilix", b"alacritty", b"kitty",
+        ))
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+
+
+def type_unicode(d, text):
+    """Paste UTF-8 into the focused X11 application.
+
+    XTest keycodes cannot express arbitrary Traditional Chinese characters.
+    Temporarily own the clipboard with UTF-8, send Ctrl+V, then restore the
+    previous plain-text selection if it was readable. Never write typed text
+    to logs or a temporary file.
+    """
+    if not text:
+        return
+    clip = "/usr/bin/xclip"
+    old = None
+    try:
+        saved = subprocess.run(
+            [clip, "-selection", "clipboard", "-o"],
+            env=ENV, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+            timeout=2, check=False,
+        )
+        if saved.returncode == 0 and len(saved.stdout) <= CLIPBOARD_MAX_BYTES:
+            old = saved.stdout
+    except (OSError, subprocess.TimeoutExpired):
+        pass
+
+    def set_clipboard(raw):
+        subprocess.run(
+            [clip, "-selection", "clipboard", "-i"],
+            input=raw, env=ENV,
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            timeout=5, check=True,
+        )
+
+    try:
+        set_clipboard(text.encode("utf-8"))
+        time.sleep(0.08)
+        control = SPECIAL["Control"]
+        shift = SPECIAL["Shift"]
+        terminal = active_terminal_window()
+        try:
+            fake_key(d, control, True)
+            if terminal:
+                fake_key(d, shift, True)
+            tap_key(d, ord("v"))
+        finally:
+            if terminal:
+                fake_key(d, shift, False)
+            fake_key(d, control, False)
+        X11.XFlush(d)
+        # Give the receiving application time to request clipboard contents.
+        time.sleep(0.30)
+    finally:
+        # Clear transient contents if the former clipboard was not plain text.
+        # This prevents sensitive typed strings from being left on the clipboard.
+        set_clipboard(old if old is not None else b"")
+
 
 def _capture_jpeg_screenshot_fallback(max_width, quality):
     with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as f:
@@ -259,7 +340,11 @@ def handle_input(data):
                 XTST.XTestFakeButtonEvent(d, button, 1, 0)
                 XTST.XTestFakeButtonEvent(d, button, 0, 0)
         elif kind == "text":
-            type_ascii(d, str(data.get("text", ""))[:500])
+            value = str(data.get("text", ""))[:500]
+            if all(32 <= ord(ch) < 127 for ch in value):
+                type_ascii(d, value)
+            else:
+                type_unicode(d, value)
         elif kind == "key":
             key = str(data.get("key", ""))
             keysym = SPECIAL.get(key)
