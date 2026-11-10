@@ -6,6 +6,7 @@ CodePilot's VM Agent can now operate as a small remote worker rather than only a
 
 - persistent VM Agent chat sessions stored in Cloudflare D1, with new/open/rename/delete controls like Workspace chat
 - ChatGPT Desktop Temporary Chat continuity: reuse the active temporary conversation for the same CodePilot chat, and rebuild context from CodePilot history if the desktop conversation changes or restarts. Temporary Chats are not available in normal ChatGPT history and cannot be reopened once lost. Only one desktop temporary conversation is active at a time.
+- Traditional Chinese/Unicode Remote Screen input: the Send text field and an offscreen IME-capable input proxy deliver completed UTF-8 text. The VM relay pastes non-ASCII input using Ctrl+V (or Ctrl+Shift+V for recognized Linux terminals). It temporarily replaces the VM clipboard and restores the previous plain-text contents when readable. Non-text clipboard formats cannot be fully restored. For backend activation after GitHub deployment, run `sudo bash /home/ubuntu/codepilot/vm-agent/deploy-remote-unicode-input.sh` from SSH. The frontend change alone does not enable Unicode injection on the running VM.
 - Read-only and Workspace permission modes
 - optional public-web access per chat message or mission
 - background Missions that continue on the VM after the browser disconnects

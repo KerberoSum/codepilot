@@ -26,6 +26,7 @@ function pointerHarness(){
     clearTimeout(id){timers.delete(id);},
     document:{getElementById(id){return id==="remoteDoubleClickButton"?control:stage;}},
     setRemoteScreenStatus(){},
+    focusRemoteKeyboard(){},
     sendRemoteInput(payload){events.push(payload);return Promise.resolve({ok:true});},
     remotePoint(e){return e.point;},
     remoteViewOnly:false, remotePointerActive:false,remotePointerDrag:false,
